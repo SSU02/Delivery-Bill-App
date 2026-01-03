@@ -178,21 +178,41 @@ class DeliveryBillApp:
         self.date_entry.insert(0, datetime.now().strftime("%d-%m-%Y"))
         ttk.Button(invoice_frame, text="📅", command=self.select_date).grid(row=0, column=4, padx=5)
         
-        ttk.Label(invoice_frame, text="Mode of Transport:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(invoice_frame, text="E WAY BILL NO:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.e_way_bill_no_entry = ttk.Entry(invoice_frame, width=30)
+        self.e_way_bill_no_entry.insert(0, "5019 3382 6386")
+        self.e_way_bill_no_entry.grid(row=1, column=1, padx=5, pady=5)
+        
+        ttk.Label(invoice_frame, text="Mode of Transport:").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
         self.transport_entry = ttk.Entry(invoice_frame, width=30)
         self.transport_entry.insert(0, "Road")
-        self.transport_entry.grid(row=1, column=1, padx=5, pady=5)
+        self.transport_entry.grid(row=1, column=3, padx=5, pady=5)
         
         self.original_var = tk.BooleanVar()
-        ttk.Checkbutton(invoice_frame, text="Original", variable=self.original_var).grid(row=1, column=2, padx=5, pady=5)
+        ttk.Checkbutton(invoice_frame, text="Original", variable=self.original_var).grid(row=1, column=4, padx=5, pady=5)
         
-        ttk.Label(invoice_frame, text="Place of Supply:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(invoice_frame, text="E WAY DOCUMENT NO:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.e_way_document_no_entry = ttk.Entry(invoice_frame, width=30)
+        self.e_way_document_no_entry.grid(row=2, column=1, padx=5, pady=5)
+        
+        self.duplicate_var = tk.BooleanVar()
+        ttk.Checkbutton(invoice_frame, text="Duplicate", variable=self.duplicate_var).grid(row=2, column=4, padx=5, pady=5)
+        
+        self.triplicate_var = tk.BooleanVar()
+        ttk.Checkbutton(invoice_frame, text="Triplicate", variable=self.triplicate_var).grid(row=3, column=4, padx=5, pady=5)
+        
+        ttk.Label(invoice_frame, text="Place of Supply:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=5)
         self.place_of_supply_entry = ttk.Entry(invoice_frame, width=30)
-        self.place_of_supply_entry.grid(row=2, column=1, padx=5, pady=5)
+        self.place_of_supply_entry.grid(row=4, column=1, padx=5, pady=5)
         
-        ttk.Label(invoice_frame, text="GSTIN/Unique ID:").grid(row=2, column=2, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(invoice_frame, text="State Code:").grid(row=4, column=2, sticky=tk.W, padx=5, pady=5)
+        self.state_code_entry = ttk.Entry(invoice_frame, width=15)
+        self.state_code_entry.insert(0, "33")
+        self.state_code_entry.grid(row=4, column=3, padx=5, pady=5)
+        
+        ttk.Label(invoice_frame, text="GSTIN/Unique ID:").grid(row=5, column=0, sticky=tk.W, padx=5, pady=5)
         self.gstin_unique_entry = ttk.Entry(invoice_frame, width=30)
-        self.gstin_unique_entry.grid(row=2, column=3, padx=5, pady=5)
+        self.gstin_unique_entry.grid(row=5, column=1, padx=5, pady=5)
         
         # Items Frame
         items_frame = ttk.LabelFrame(main_frame, text="Description of Goods", padding="10")
@@ -773,7 +793,7 @@ class DeliveryBillApp:
         hsn_entry.grid(row=2, column=1, padx=10, pady=10, sticky=(tk.W, tk.E))
         
         ttk.Label(dialog, text="Unit *:").grid(row=3, column=0, padx=10, pady=10, sticky=tk.W)
-        unit_combo = ttk.Combobox(dialog, width=32, values=['NOS', 'Kilograms'], state="readonly")
+        unit_combo = ttk.Combobox(dialog, width=32, values=['NOS', 'KG'], state="readonly")
         unit_combo.grid(row=3, column=1, padx=10, pady=10, sticky=tk.W)
         unit_combo.set('NOS')
         
@@ -870,7 +890,12 @@ class DeliveryBillApp:
             'customer': customer,
             'mode_of_transport': self.transport_entry.get(),
             'is_original': self.original_var.get(),
+            'is_duplicate': self.duplicate_var.get(),
+            'is_triplicate': self.triplicate_var.get(),
+            'e_way_bill_no': self.e_way_bill_no_entry.get(),
+            'e_way_document_no': self.e_way_document_no_entry.get(),
             'place_of_supply': self.place_of_supply_entry.get(),
+            'state_code': self.state_code_entry.get(),
             'gstin_unique_id': self.gstin_unique_entry.get(),
             'items': self.items,
             'freight_charges': float(self.freight_entry.get() or 0),
@@ -915,7 +940,14 @@ class DeliveryBillApp:
             self.transport_entry.delete(0, tk.END)
             self.transport_entry.insert(0, "Road")
             self.original_var.set(False)
+            self.duplicate_var.set(False)
+            self.triplicate_var.set(False)
+            self.e_way_bill_no_entry.delete(0, tk.END)
+            self.e_way_bill_no_entry.insert(0, "5019 3382 6386")
+            self.e_way_document_no_entry.delete(0, tk.END)
             self.place_of_supply_entry.delete(0, tk.END)
+            self.state_code_entry.delete(0, tk.END)
+            self.state_code_entry.insert(0, "33")
             self.gstin_unique_entry.delete(0, tk.END)
             
             self.items = []
@@ -1027,7 +1059,7 @@ class ItemDialog:
             ttk.Label(dialog_scrollable, text=label).grid(row=row, column=0, padx=10, pady=5, sticky=tk.W)
             
             if key == 'unit':
-                entry = ttk.Combobox(dialog_scrollable, width=30, values=['NOS', 'Kilograms'], state="readonly")
+                entry = ttk.Combobox(dialog_scrollable, width=30, values=['NOS', 'KG'], state="readonly")
             else:
                 entry = ttk.Entry(dialog_scrollable, width=30)
             
@@ -1132,7 +1164,7 @@ class ItemDialog:
         hsn_entry.grid(row=1, column=1, padx=10, pady=10, sticky=(tk.W, tk.E))
         
         ttk.Label(dialog, text="Unit *:").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
-        unit_combo = ttk.Combobox(dialog, width=32, values=['NOS', 'Kilograms'], state="readonly")
+        unit_combo = ttk.Combobox(dialog, width=32, values=['NOS', 'KG'], state="readonly")
         unit_combo.grid(row=2, column=1, padx=10, pady=10, sticky=tk.W)
         unit_combo.set('NOS')
         
@@ -1413,7 +1445,7 @@ class GoodsManager:
         hsn_entry.grid(row=2, column=1, padx=10, pady=10, sticky=(tk.W, tk.E))
         
         ttk.Label(dialog, text="Unit *:").grid(row=3, column=0, padx=10, pady=10, sticky=tk.W)
-        unit_combo = ttk.Combobox(dialog, width=32, values=['NOS', 'Kilograms'], state="readonly")
+        unit_combo = ttk.Combobox(dialog, width=32, values=['NOS', 'KG'], state="readonly")
         unit_combo.grid(row=3, column=1, padx=10, pady=10, sticky=tk.W)
         unit_combo.set('NOS')
         
@@ -1502,7 +1534,7 @@ class GoodsManager:
             hsn_entry.insert(0, good['hsn_code'])
         
         ttk.Label(dialog, text="Unit *:").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
-        unit_combo = ttk.Combobox(dialog, width=27, values=['NOS', 'Kilograms'], state="readonly")
+        unit_combo = ttk.Combobox(dialog, width=27, values=['NOS', 'KG'], state="readonly")
         unit_combo.grid(row=2, column=1, padx=10, pady=10)
         if good:
             unit_combo.set(good['unit'])
