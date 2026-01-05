@@ -37,7 +37,8 @@ from pdf_generator import PDFGenerator
 from number_to_words import number_to_words
 from dialogs_modern import (
     AddAreaDialog, AddVehicleDialog, AddCustomerDialog,
-    AddGoodDialog, AddBlasterDialog, NewGoodDialog, SelectCustomerDialog
+    AddGoodDialog, AddBlasterDialog, NewGoodDialog, SelectCustomerDialog,
+    LicenseActivationDialog
 )
 import re
 import math
@@ -1454,6 +1455,27 @@ def main():
     palette.setColor(QPalette.ColorRole.Window, QColor(245, 246, 250))
     palette.setColor(QPalette.ColorRole.WindowText, QColor(33, 37, 41))
     app.setPalette(palette)
+    
+    # Check license before showing main window
+    from license_manager import LicenseManager
+    license_manager = LicenseManager()
+    is_valid, message = license_manager.is_license_valid()
+    
+    if not is_valid:
+        # Show activation dialog
+        hardware_id = license_manager.get_hardware_id()
+        activation_dialog = LicenseActivationDialog(hardware_id)
+        
+        if activation_dialog.exec() != DIALOG_ACCEPTED:
+            # User didn't activate, exit
+            sys.exit(0)
+        
+        # Re-check license after activation
+        is_valid, message = license_manager.is_license_valid()
+        if not is_valid:
+            QMessageBox.critical(None, "License Error", 
+                                f"License activation failed.\n\n{message}")
+            sys.exit(1)
     
     window = BatchProcessingWindow()
     window.show()

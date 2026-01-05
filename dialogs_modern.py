@@ -661,3 +661,146 @@ class SelectCustomerDialog(ModernDialog):
         else:
             QMessageBox.warning(self, "Warning", "Please select a customer")
 
+
+class LicenseActivationDialog(ModernDialog):
+    """Dialog for activating the application license"""
+    def __init__(self, hardware_id, parent=None):
+        super().__init__("Activate License", parent)
+        self.hardware_id = hardware_id
+        self.setMinimumWidth(600)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        # Title
+        title = QLabel("License Activation Required")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Info text
+        info_text = QLabel(
+            "This application requires a valid license to run.\n"
+            "Please enter your license key below to activate."
+        )
+        info_text.setStyleSheet("font-size: 12px; color: #6c757d; margin-bottom: 20px;")
+        layout.addWidget(info_text)
+        
+        # Hardware ID display
+        hw_group = QGroupBox("Your Computer ID")
+        hw_layout = QVBoxLayout()
+        hw_label = QLabel(f"Hardware ID: {self.hardware_id}")
+        hw_label.setStyleSheet("font-family: monospace; font-size: 13px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;")
+        hw_layout.addWidget(hw_label)
+        hw_info = QLabel("Please provide this Hardware ID to your vendor to obtain a license key.")
+        hw_info.setStyleSheet("font-size: 11px; color: #6c757d; margin-top: 5px;")
+        hw_layout.addWidget(hw_info)
+        hw_group.setLayout(hw_layout)
+        layout.addWidget(hw_group)
+        
+        # License key input
+        key_group = QGroupBox("Enter License Key")
+        key_layout = QVBoxLayout()
+        self.license_key_edit = QLineEdit()
+        self.license_key_edit.setPlaceholderText("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX")
+        self.license_key_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 12px;
+                border: 2px solid #ced4da;
+                border-radius: 5px;
+                font-size: 14px;
+                font-family: monospace;
+                letter-spacing: 2px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #007bff;
+            }
+        """)
+        self.license_key_edit.textChanged.connect(self.format_license_key)
+        key_layout.addWidget(self.license_key_edit)
+        key_group.setLayout(key_layout)
+        layout.addWidget(key_group)
+        
+        # Status label
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("font-size: 11px; padding: 5px;")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+        
+        layout.addStretch()
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        btn_activate = QPushButton("Activate")
+        btn_activate.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                padding: 10px 30px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+            QPushButton:pressed {
+                background-color: #004085;
+            }
+        """)
+        btn_activate.clicked.connect(self.activate_license)
+        
+        btn_exit = QPushButton("Exit")
+        btn_exit.setStyleSheet("background-color: #6c757d; color: white; padding: 10px 30px; border-radius: 5px; font-size: 13px;")
+        btn_exit.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(btn_exit)
+        btn_layout.addWidget(btn_activate)
+        layout.addLayout(btn_layout)
+        
+        self.setLayout(layout)
+    
+    def format_license_key(self, text):
+        """Format license key with dashes"""
+        # Remove all non-alphanumeric characters
+        clean = ''.join(c for c in text.upper() if c.isalnum())
+        
+        # Add dashes every 4 characters
+        formatted = '-'.join([clean[i:i+4] for i in range(0, len(clean), 4)])
+        
+        # Limit to 35 characters (8 groups of 4 + 7 dashes)
+        if len(formatted) > 35:
+            formatted = formatted[:35]
+        
+        if formatted != text:
+            self.license_key_edit.blockSignals(True)
+            self.license_key_edit.setText(formatted)
+            self.license_key_edit.blockSignals(False)
+    
+    def activate_license(self):
+        """Validate and activate the license"""
+        from license_manager import LicenseManager
+        
+        license_key = self.license_key_edit.text().strip()
+        
+        if not license_key or len(license_key.replace('-', '')) < 32:
+            self.status_label.setText("Please enter a valid license key")
+            self.status_label.setStyleSheet("font-size: 11px; padding: 5px; color: #dc3545;")
+            return
+        
+        license_manager = LicenseManager()
+        is_valid, message = license_manager.validate_license_key(license_key)
+        
+        if is_valid:
+            self.status_label.setText(message)
+            self.status_label.setStyleSheet("font-size: 11px; padding: 5px; color: #28a745;")
+            QMessageBox.information(self, "Success", message)
+            self.accept()
+        else:
+            self.status_label.setText(message)
+            self.status_label.setStyleSheet("font-size: 11px; padding: 5px; color: #dc3545;")
+
