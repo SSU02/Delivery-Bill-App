@@ -38,6 +38,9 @@ class DeliveryBillApp:
         
         # Load default tax rates
         self.load_tax_rates()
+        
+        # Load vehicles on startup (common to all areas)
+        self.refresh_vehicles()
     
     @staticmethod
     def make_dialog_visible(dialog):
@@ -135,6 +138,8 @@ class DeliveryBillApp:
         
         ttk.Button(self.location_frame, text="Add Vehicle", 
                   command=self.add_vehicle).grid(row=1, column=2, padx=5, pady=5)
+        ttk.Button(self.location_frame, text="Manage Vehicles", 
+                  command=self.manage_vehicles).grid(row=1, column=3, padx=5, pady=5)
         
         # Customer Frame
         customer_frame = ttk.LabelFrame(main_frame, text="Receiver Details", padding="10")
@@ -149,6 +154,8 @@ class DeliveryBillApp:
                   command=self.add_customer).grid(row=0, column=2, padx=5, pady=5)
         ttk.Button(customer_frame, text="Edit Customer", 
                   command=self.edit_customer).grid(row=0, column=3, padx=5, pady=5)
+        ttk.Button(customer_frame, text="Manage Customers", 
+                  command=self.manage_customers).grid(row=0, column=4, padx=5, pady=5)
         
         # Customer details fields
         self.customer_fields = {}
@@ -281,17 +288,21 @@ class DeliveryBillApp:
         blaster_frame = ttk.LabelFrame(main_frame, text="Blaster Details", padding="10")
         blaster_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
         
-        ttk.Label(blaster_frame, text="Name of shot fire / Blaster:").grid(row=0, column=0, sticky=tk.W, padx=5)
-        self.blaster_name_entry = ttk.Entry(blaster_frame, width=40)
-        self.blaster_name_entry.grid(row=0, column=1, padx=5, pady=5)
+        ttk.Label(blaster_frame, text="Blaster:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.blaster_combo = ttk.Combobox(blaster_frame, width=45, state="readonly")
+        self.blaster_combo.grid(row=0, column=1, padx=5, pady=5, sticky=(tk.W, tk.E))
+        self.blaster_combo.bind("<<ComboboxSelected>>", self.on_blaster_select)
         
-        ttk.Label(blaster_frame, text="Document No:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        self.document_no_entry = ttk.Entry(blaster_frame, width=40)
-        self.document_no_entry.grid(row=1, column=1, padx=5, pady=5)
+        blaster_btn_frame = ttk.Frame(blaster_frame)
+        blaster_btn_frame.grid(row=0, column=2, padx=5, pady=5)
+        ttk.Button(blaster_btn_frame, text="Add Blaster", command=self.add_blaster_quick).pack(side=tk.LEFT, padx=2)
+        ttk.Button(blaster_btn_frame, text="Manage", command=self.manage_blasters).pack(side=tk.LEFT, padx=2)
         
-        ttk.Label(blaster_frame, text="Address:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
-        self.blaster_address_entry = ttk.Entry(blaster_frame, width=40)
-        self.blaster_address_entry.grid(row=2, column=1, padx=5, pady=5)
+        blaster_frame.columnconfigure(1, weight=1)
+        
+        # Store selected blaster ID
+        self.selected_blaster_id = None
+        self.current_blaster_data = None
         
         # Action Buttons
         action_frame = ttk.Frame(main_frame)
@@ -317,40 +328,37 @@ class DeliveryBillApp:
         self.current_location_id = None
     
     def refresh_locations(self):
-        """Refresh location combobox"""
-        if not self.current_category:
-            return
-        locations = self.db.get_locations(self.current_category)
+        """Refresh location combobox (common to both categories)"""
+        # Renumber locations to ensure sequential IDs
+        self.db.renumber_locations()
+        locations = self.db.get_locations()
         location_names = [loc['name'] for loc in locations]
         self.location_combo['values'] = location_names
     
     def on_location_select(self, event=None):
-        """Handle location selection"""
+        """Handle location selection (locations are common to both categories)"""
         location_name = self.location_combo.get()
-        if not location_name or not self.current_category:
+        if not location_name:
             return
         
-        locations = self.db.get_locations(self.current_category)
+        locations = self.db.get_locations()
         location = next((loc for loc in locations if loc['name'] == location_name), None)
         
         if location:
             self.current_location_id = location['id']
+            # Vehicles are now common, but refresh anyway to ensure they're loaded
             self.refresh_vehicles()
     
     def refresh_vehicles(self):
-        """Refresh vehicle combobox"""
-        if not self.current_location_id:
-            return
-        vehicles = self.db.get_vehicles(self.current_location_id)
+        """Refresh vehicle combobox (common to all areas and categories)"""
+        # Renumber vehicles to ensure sequential IDs
+        self.db.renumber_vehicles()
+        vehicles = self.db.get_vehicles()
         vehicle_numbers = [v['vehicle_number'] for v in vehicles]
         self.vehicle_combo['values'] = vehicle_numbers
     
     def add_location(self):
-        """Add a new location"""
-        if not self.current_category:
-            messagebox.showwarning("Warning", "Please select a category first")
-            return
-        
+        """Add a new location (common to both categories)"""
         dialog = tk.Toplevel(self.root)
         dialog.title("Add Location")
         dialog.geometry("400x150")
@@ -369,7 +377,7 @@ class DeliveryBillApp:
                 messagebox.showerror("Error", "Location name cannot be empty")
                 return
             try:
-                self.db.add_location(name, self.current_category)
+                self.db.add_location(name)
                 messagebox.showinfo("Success", "Location added successfully")
                 self.refresh_locations()
                 self.location_combo.set(name)
@@ -382,11 +390,7 @@ class DeliveryBillApp:
         name_entry.bind('<Return>', lambda e: save_location())
     
     def add_vehicle(self):
-        """Add a new vehicle"""
-        if not self.current_location_id:
-            messagebox.showwarning("Warning", "Please select a location first")
-            return
-        
+        """Add a new vehicle (common to all areas and categories)"""
         dialog = tk.Toplevel(self.root)
         dialog.title("Add Vehicle")
         dialog.geometry("400x150")
@@ -405,7 +409,7 @@ class DeliveryBillApp:
                 messagebox.showerror("Error", "Vehicle number cannot be empty")
                 return
             try:
-                self.db.add_vehicle(self.current_location_id, vehicle_no)
+                self.db.add_vehicle(vehicle_no)
                 messagebox.showinfo("Success", "Vehicle added successfully")
                 self.refresh_vehicles()
                 self.vehicle_combo.set(vehicle_no)
@@ -416,8 +420,157 @@ class DeliveryBillApp:
         ttk.Button(dialog, text="Save", command=save_vehicle).grid(row=1, column=0, columnspan=2, pady=10)
         vehicle_entry.bind('<Return>', lambda e: save_vehicle())
     
+    def manage_vehicles(self):
+        """Manage vehicles (edit/delete) - common to all areas and categories"""
+        VehiclesManager(self.root, self.db, callback=self.refresh_vehicles)
+    
+    def manage_customers(self):
+        """Manage customers (add/edit/delete)"""
+        CustomersManager(self.root, self.db, callback=self.refresh_customers)
+    
+    def manage_blasters(self):
+        """Manage blasters (add/edit/delete)"""
+        BlastersManager(self.root, self.db, callback=self.refresh_blasters)
+    
+    def refresh_blasters(self):
+        """Refresh blaster combobox"""
+        blasters = self.db.get_blasters()
+        blaster_names = [b['name'] for b in blasters]
+        self.blaster_combo['values'] = blaster_names
+    
+    def on_blaster_select(self, event=None):
+        """Handle blaster selection"""
+        blaster_name = self.blaster_combo.get()
+        if not blaster_name:
+            self.selected_blaster_id = None
+            self.current_blaster_data = None
+            return
+        
+        blasters = self.db.get_blasters()
+        blaster = next((b for b in blasters if b['name'] == blaster_name), None)
+        if blaster:
+            self.selected_blaster_id = blaster['id']
+            self.current_blaster_data = blaster
+    
+    def add_blaster_quick(self):
+        """Quick add blaster dialog"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add Blaster")
+        dialog.geometry("500x280")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self.make_dialog_visible(dialog)
+        
+        fields = [
+            ("Name *", "name"),
+            ("Document No", "document_no"),
+            ("Address", "address")
+        ]
+        
+        entries = {}
+        for idx, (label, key) in enumerate(fields):
+            ttk.Label(dialog, text=label, font=('Helvetica', 10)).grid(row=idx, column=0, padx=15, pady=8, sticky=tk.W)
+            if key == 'address':
+                entry = tk.Text(dialog, width=40, height=3, wrap=tk.WORD, font=('Helvetica', 10))
+                entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+            else:
+                entry = ttk.Entry(dialog, width=42, font=('Helvetica', 10))
+                entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+            entries[key] = entry
+            dialog.columnconfigure(1, weight=1)
+        
+        entries['name'].focus()
+        
+        def save():
+            name = entries['name'].get().strip() if isinstance(entries['name'], tk.Text) else entries['name'].get().strip()
+            if isinstance(entries['document_no'], tk.Text):
+                document_no = entries['document_no'].get("1.0", tk.END).strip()
+            else:
+                document_no = entries['document_no'].get().strip()
+            if isinstance(entries['address'], tk.Text):
+                address = entries['address'].get("1.0", tk.END).strip()
+            else:
+                address = entries['address'].get().strip()
+            
+            if not name:
+                messagebox.showerror("Error", "Blaster name is required")
+                return
+            try:
+                self.db.add_blaster(name, document_no, address)
+                messagebox.showinfo("Success", "Blaster added successfully")
+                self.refresh_blasters()
+                self.blaster_combo.set(name)
+                self.on_blaster_select()
+                dialog.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to add blaster: {str(e)}")
+        
+        ttk.Button(dialog, text="Save", command=save, width=12).grid(row=len(fields), column=0, columnspan=2, pady=20)
+        entries['name'].bind('<Return>', lambda e: entries['document_no'].focus())
+    
+    def _quick_add_blaster_in_dialog(self, parent_dialog, blaster_combo):
+        """Quick add blaster from within a dialog"""
+        dialog = tk.Toplevel(parent_dialog)
+        dialog.title("Add Blaster")
+        dialog.geometry("500x280")
+        dialog.transient(parent_dialog)
+        dialog.grab_set()
+        self.make_dialog_visible(dialog)
+        
+        fields = [
+            ("Name *", "name"),
+            ("Document No", "document_no"),
+            ("Address", "address")
+        ]
+        
+        entries = {}
+        for idx, (label, key) in enumerate(fields):
+            ttk.Label(dialog, text=label, font=('Helvetica', 10)).grid(row=idx, column=0, padx=15, pady=8, sticky=tk.W)
+            if key == 'address':
+                entry = tk.Text(dialog, width=40, height=3, wrap=tk.WORD, font=('Helvetica', 10))
+                entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+            else:
+                entry = ttk.Entry(dialog, width=42, font=('Helvetica', 10))
+                entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+            entries[key] = entry
+            dialog.columnconfigure(1, weight=1)
+        
+        entries['name'].focus()
+        
+        def save():
+            name = entries['name'].get().strip() if isinstance(entries['name'], tk.Text) else entries['name'].get().strip()
+            if isinstance(entries['document_no'], tk.Text):
+                document_no = entries['document_no'].get("1.0", tk.END).strip()
+            else:
+                document_no = entries['document_no'].get().strip()
+            if isinstance(entries['address'], tk.Text):
+                address = entries['address'].get("1.0", tk.END).strip()
+            else:
+                address = entries['address'].get().strip()
+            
+            if not name:
+                messagebox.showerror("Error", "Blaster name is required")
+                return
+            try:
+                self.db.add_blaster(name, document_no, address)
+                messagebox.showinfo("Success", "Blaster added successfully")
+                self.refresh_blasters()
+                # Refresh the combobox in the parent dialog
+                blasters = self.db.get_blasters()
+                blaster_names = [b['name'] for b in blasters]
+                blaster_combo['values'] = blaster_names
+                blaster_combo.set(name)
+                dialog.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to add blaster: {str(e)}")
+        
+        ttk.Button(dialog, text="Save", command=save, width=12).grid(row=len(fields), column=0, columnspan=2, pady=20)
+        entries['name'].bind('<Return>', lambda e: entries['document_no'].focus())
+    
     def refresh_customers(self):
         """Refresh customer combobox"""
+        # Renumber customers to ensure sequential IDs
+        self.db.renumber_customers()
         customers = self.db.get_customers()
         customer_names = [c['name'] for c in customers]
         self.customer_combo['values'] = customer_names
@@ -449,12 +602,22 @@ class DeliveryBillApp:
             # Auto-fill place of supply
             self.place_of_supply_entry.delete(0, tk.END)
             self.place_of_supply_entry.insert(0, customer.get('address', ''))
+            
+            # Auto-fill blaster from customer data
+            blaster_name = customer.get('blaster_name', '')
+            if blaster_name:
+                self.blaster_combo.set(blaster_name)
+                self.on_blaster_select()
+            else:
+                self.blaster_combo.set('')
+                self.selected_blaster_id = None
+                self.current_blaster_data = None
     
     def add_customer(self):
         """Add a new customer"""
         dialog = tk.Toplevel(self.root)
         dialog.title("Add Customer")
-        dialog.geometry("500x350")
+        dialog.geometry("500x450")
         dialog.transient(self.root)
         dialog.grab_set()
         self.make_dialog_visible(dialog)
@@ -467,10 +630,24 @@ class DeliveryBillApp:
         
         entries = {}
         for idx, (label, key) in enumerate(fields):
-            ttk.Label(dialog, text=label).grid(row=idx, column=0, padx=10, pady=5, sticky=tk.W)
-            entry = ttk.Entry(dialog, width=40)
-            entry.grid(row=idx, column=1, padx=10, pady=5)
+            ttk.Label(dialog, text=label, font=('Helvetica', 10)).grid(row=idx, column=0, padx=15, pady=8, sticky=tk.W)
+            entry = ttk.Entry(dialog, width=42, font=('Helvetica', 10))
+            entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
             entries[key] = entry
+            dialog.columnconfigure(1, weight=1)
+        
+        # Blaster selection
+        row_idx = len(fields)
+        ttk.Label(dialog, text="Blaster:", font=('Helvetica', 10)).grid(row=row_idx, column=0, padx=15, pady=8, sticky=tk.W)
+        blaster_combo = ttk.Combobox(dialog, width=39, state="readonly", font=('Helvetica', 10))
+        blasters = self.db.get_blasters()
+        blaster_names = [b['name'] for b in blasters]
+        blaster_combo['values'] = blaster_names
+        blaster_combo.grid(row=row_idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+        
+        blaster_btn_frame = ttk.Frame(dialog)
+        blaster_btn_frame.grid(row=row_idx, column=2, padx=5, pady=8)
+        ttk.Button(blaster_btn_frame, text="Add", command=lambda: self._quick_add_blaster_in_dialog(dialog, blaster_combo)).pack(side=tk.LEFT, padx=2)
         
         entries['name'].focus()
         
@@ -480,6 +657,14 @@ class DeliveryBillApp:
                 messagebox.showerror("Error", "Customer name is required")
                 return
             
+            # Get selected blaster ID
+            selected_blaster_name = blaster_combo.get()
+            blaster_id = None
+            if selected_blaster_name:
+                blaster = next((b for b in blasters if b['name'] == selected_blaster_name), None)
+                if blaster:
+                    blaster_id = blaster['id']
+            
             try:
                 self.db.add_customer(
                     name,
@@ -487,7 +672,8 @@ class DeliveryBillApp:
                     entries['sf_no'].get().strip(),
                     entries['rc_no'].get().strip(),
                     entries['state'].get().strip(),
-                    entries['gstin'].get().strip()
+                    entries['gstin'].get().strip(),
+                    blaster_id
                 )
                 messagebox.showinfo("Success", "Customer added successfully")
                 self.refresh_customers()
@@ -497,7 +683,7 @@ class DeliveryBillApp:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to add customer: {str(e)}")
         
-        ttk.Button(dialog, text="Save", command=save_customer).grid(row=len(fields), column=0, columnspan=2, pady=20)
+        ttk.Button(dialog, text="Save", command=save_customer, width=12).grid(row=row_idx+1, column=0, columnspan=2, pady=20)
         entries['name'].bind('<Return>', lambda e: entries['address'].focus())
     
     def edit_customer(self):
@@ -509,7 +695,7 @@ class DeliveryBillApp:
         customer = self.current_customer
         dialog = tk.Toplevel(self.root)
         dialog.title("Edit Customer")
-        dialog.geometry("500x350")
+        dialog.geometry("500x450")
         dialog.transient(self.root)
         dialog.grab_set()
         self.make_dialog_visible(dialog)
@@ -522,12 +708,30 @@ class DeliveryBillApp:
         
         entries = {}
         for idx, (label, key) in enumerate(fields):
-            ttk.Label(dialog, text=label).grid(row=idx, column=0, padx=10, pady=5, sticky=tk.W)
-            entry = ttk.Entry(dialog, width=40)
-            entry.grid(row=idx, column=1, padx=10, pady=5)
+            ttk.Label(dialog, text=label, font=('Helvetica', 10)).grid(row=idx, column=0, padx=15, pady=8, sticky=tk.W)
+            entry = ttk.Entry(dialog, width=42, font=('Helvetica', 10))
+            entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
             # Pre-fill with current values
             entry.insert(0, customer.get(key, ''))
             entries[key] = entry
+            dialog.columnconfigure(1, weight=1)
+        
+        # Blaster selection
+        row_idx = len(fields)
+        ttk.Label(dialog, text="Blaster:", font=('Helvetica', 10)).grid(row=row_idx, column=0, padx=15, pady=8, sticky=tk.W)
+        blaster_combo = ttk.Combobox(dialog, width=39, state="readonly", font=('Helvetica', 10))
+        blasters = self.db.get_blasters()
+        blaster_names = [b['name'] for b in blasters]
+        blaster_combo['values'] = blaster_names
+        # Pre-select current blaster
+        current_blaster_name = customer.get('blaster_name', '')
+        if current_blaster_name:
+            blaster_combo.set(current_blaster_name)
+        blaster_combo.grid(row=row_idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+        
+        blaster_btn_frame = ttk.Frame(dialog)
+        blaster_btn_frame.grid(row=row_idx, column=2, padx=5, pady=8)
+        ttk.Button(blaster_btn_frame, text="Add", command=lambda: self._quick_add_blaster_in_dialog(dialog, blaster_combo)).pack(side=tk.LEFT, padx=2)
         
         entries['name'].focus()
         
@@ -537,6 +741,14 @@ class DeliveryBillApp:
                 messagebox.showerror("Error", "Customer name is required")
                 return
             
+            # Get selected blaster ID
+            selected_blaster_name = blaster_combo.get()
+            blaster_id = None
+            if selected_blaster_name:
+                blaster = next((b for b in blasters if b['name'] == selected_blaster_name), None)
+                if blaster:
+                    blaster_id = blaster['id']
+            
             try:
                 self.db.update_customer(
                     customer['id'],
@@ -545,7 +757,8 @@ class DeliveryBillApp:
                     entries['sf_no'].get().strip(),
                     entries['rc_no'].get().strip(),
                     entries['state'].get().strip(),
-                    entries['gstin'].get().strip()
+                    entries['gstin'].get().strip(),
+                    blaster_id
                 )
                 messagebox.showinfo("Success", "Customer updated successfully")
                 self.refresh_customers()
@@ -555,7 +768,7 @@ class DeliveryBillApp:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to update customer: {str(e)}")
         
-        ttk.Button(dialog, text="Save", command=save_customer).grid(row=len(fields), column=0, columnspan=2, pady=20)
+        ttk.Button(dialog, text="Save", command=save_customer, width=12).grid(row=row_idx+1, column=0, columnspan=2, pady=20)
         entries['name'].bind('<Return>', lambda e: entries['address'].focus())
     
     def select_date(self):
@@ -901,9 +1114,9 @@ class DeliveryBillApp:
             'freight_charges': float(self.freight_entry.get() or 0),
             'grand_total': self._round_total(sum(item.get('total_amount', 0) for item in self.items) + float(self.freight_entry.get() or 0)),
             'total_in_words': self.total_words_entry.get(),
-            'blaster_name': self.blaster_name_entry.get(),
-            'document_no': self.document_no_entry.get(),
-            'blaster_address': self.blaster_address_entry.get()
+            'blaster_name': self.current_blaster_data.get('name', '') if self.current_blaster_data else customer.get('blaster_name', ''),
+            'document_no': self.current_blaster_data.get('document_no', '') if self.current_blaster_data else customer.get('blaster_document_no', ''),
+            'blaster_address': self.current_blaster_data.get('address', '') if self.current_blaster_data else customer.get('blaster_address', '')
         }
         
         # Ask for save location
@@ -958,9 +1171,9 @@ class DeliveryBillApp:
             self.grand_total_label.config(text="0.00")
             self.total_words_entry.delete(0, tk.END)
             
-            self.blaster_name_entry.delete(0, tk.END)
-            self.document_no_entry.delete(0, tk.END)
-            self.blaster_address_entry.delete(0, tk.END)
+            self.blaster_combo.set('')
+            self.selected_blaster_id = None
+            self.current_blaster_data = None
 
 
 class ItemDialog:
@@ -1395,6 +1608,9 @@ class GoodsManager:
         for item in self.tree.get_children():
             self.tree.delete(item)
         
+        # Renumber goods to ensure sequential IDs
+        self.db.renumber_goods()
+        
         goods = self.db.get_goods()
         for good in goods:
             self.tree.insert('', tk.END, values=(
@@ -1597,6 +1813,343 @@ class GoodsManager:
             conn.commit()
             conn.close()
             self.refresh_tree()
+
+
+class VehiclesManager:
+    """Dialog to manage vehicles - common to all areas and categories"""
+    def __init__(self, parent, db, callback=None):
+        self.db = db
+        self.callback = callback
+        
+        self.window = tk.Toplevel(parent)
+        self.window.title("Manage Vehicles")
+        self.window.geometry("600x400")
+        self.window.transient(parent)
+        self.window.grab_set()
+        
+        # Make visible on macOS
+        self.window.lift()
+        self.window.focus_force()
+        self.window.attributes('-topmost', True)
+        self.window.after(100, lambda: self.window.attributes('-topmost', False))
+        
+        # Treeview for vehicles
+        columns = ('id', 'vehicle_number')
+        self.tree = ttk.Treeview(self.window, columns=columns, show='headings', height=15)
+        self.tree.heading('id', text='ID')
+        self.tree.heading('vehicle_number', text='Vehicle Number')
+        self.tree.column('id', width=50)
+        self.tree.column('vehicle_number', width=400)
+        
+        self.tree.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.window.columnconfigure(0, weight=1)
+        self.window.rowconfigure(0, weight=1)
+        
+        # Buttons
+        btn_frame = ttk.Frame(self.window)
+        btn_frame.grid(row=1, column=0, columnspan=3, pady=10)
+        
+        ttk.Button(btn_frame, text="Add Vehicle", command=self.add_vehicle).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Delete Vehicle", command=self.delete_vehicle).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Close", command=self.window.destroy).pack(side=tk.LEFT, padx=5)
+        
+        self.refresh_tree()
+    
+    def refresh_tree(self):
+        """Refresh vehicles tree"""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Renumber vehicles to ensure sequential IDs
+        self.db.renumber_vehicles()
+        
+        vehicles = self.db.get_vehicles()
+        for vehicle in vehicles:
+            self.tree.insert('', tk.END, values=(vehicle['id'], vehicle['vehicle_number']))
+    
+    def add_vehicle(self):
+        """Add new vehicle"""
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Add Vehicle")
+        dialog.geometry("400x150")
+        dialog.transient(self.window)
+        dialog.grab_set()
+        
+        # Make visible on macOS
+        dialog.lift()
+        dialog.focus_force()
+        dialog.attributes('-topmost', True)
+        dialog.after(100, lambda: dialog.attributes('-topmost', False))
+        
+        ttk.Label(dialog, text="Vehicle Number:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+        name_entry = ttk.Entry(dialog, width=30)
+        name_entry.grid(row=0, column=1, padx=10, pady=10)
+        name_entry.focus()
+        
+        def save():
+            vehicle_number = name_entry.get().strip()
+            if not vehicle_number:
+                messagebox.showerror("Error", "Vehicle number cannot be empty")
+                return
+            try:
+                self.db.add_vehicle(vehicle_number)
+                messagebox.showinfo("Success", "Vehicle added successfully")
+                self.refresh_tree()
+                if self.callback:
+                    self.callback()
+                dialog.destroy()
+            except ValueError as e:
+                messagebox.showerror("Error", str(e))
+        
+        ttk.Button(dialog, text="Save", command=save).grid(row=1, column=0, columnspan=2, pady=10)
+        name_entry.bind('<Return>', lambda e: save())
+    
+    def delete_vehicle(self):
+        """Delete selected vehicle"""
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a vehicle to delete")
+            return
+        
+        vehicle_id = self.tree.item(selection[0])['values'][0]
+        vehicle_number = self.tree.item(selection[0])['values'][1]
+        
+        if messagebox.askyesno("Confirm", 
+                               f"Delete vehicle '{vehicle_number}'?"):
+            try:
+                self.db.delete_vehicle(vehicle_id)
+                messagebox.showinfo("Success", "Vehicle deleted successfully")
+                self.refresh_tree()
+                if self.callback:
+                    self.callback()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete vehicle: {str(e)}")
+
+
+class BlastersManager:
+    """Dialog to manage blasters"""
+    def __init__(self, parent, db, callback=None):
+        self.db = db
+        self.callback = callback
+        
+        self.window = tk.Toplevel(parent)
+        self.window.title("Manage Blasters")
+        self.window.geometry("850x500")
+        self.window.transient(parent)
+        self.window.grab_set()
+        
+        # Make visible on macOS
+        self.window.lift()
+        self.window.focus_force()
+        self.window.attributes('-topmost', True)
+        self.window.after(100, lambda: self.window.attributes('-topmost', False))
+        
+        # Treeview for blasters
+        columns = ('id', 'name', 'document_no', 'address')
+        self.tree = ttk.Treeview(self.window, columns=columns, show='headings', height=15)
+        self.tree.heading('id', text='ID')
+        self.tree.heading('name', text='Name')
+        self.tree.heading('document_no', text='Document No')
+        self.tree.heading('address', text='Address')
+        
+        self.tree.column('id', width=60)
+        self.tree.column('name', width=200)
+        self.tree.column('document_no', width=150)
+        self.tree.column('address', width=350)
+        
+        self.tree.grid(row=0, column=0, columnspan=4, padx=10, pady=10, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.window.columnconfigure(0, weight=1)
+        self.window.rowconfigure(0, weight=1)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(self.window, orient=tk.VERTICAL, command=self.tree.yview)
+        scrollbar.grid(row=0, column=4, sticky=(tk.N, tk.S))
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Buttons
+        btn_frame = ttk.Frame(self.window)
+        btn_frame.grid(row=1, column=0, columnspan=4, pady=10)
+        
+        ttk.Button(btn_frame, text="Add Blaster", command=self.add_blaster).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Edit Blaster", command=self.edit_blaster).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Delete Blaster", command=self.delete_blaster).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Close", command=self.window.destroy).pack(side=tk.LEFT, padx=5)
+        
+        self.refresh_tree()
+    
+    def refresh_tree(self):
+        """Refresh blasters tree"""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Renumber blasters to ensure sequential IDs
+        self.db.renumber_blasters()
+        
+        blasters = self.db.get_blasters()
+        for blaster in blasters:
+            self.tree.insert('', tk.END, values=(
+                blaster['id'],
+                blaster.get('name', ''),
+                blaster.get('document_no', ''),
+                blaster.get('address', '')
+            ))
+    
+    def add_blaster(self):
+        """Add new blaster"""
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Add Blaster")
+        dialog.geometry("520x280")
+        dialog.transient(self.window)
+        dialog.grab_set()
+        
+        # Make visible on macOS
+        dialog.lift()
+        dialog.focus_force()
+        dialog.attributes('-topmost', True)
+        dialog.after(100, lambda: dialog.attributes('-topmost', False))
+        
+        fields = [
+            ("Name *", "name"),
+            ("Document No", "document_no"),
+            ("Address", "address")
+        ]
+        
+        entries = {}
+        for idx, (label, key) in enumerate(fields):
+            ttk.Label(dialog, text=label, font=('Helvetica', 10)).grid(row=idx, column=0, padx=15, pady=8, sticky=tk.W)
+            if key == 'address':
+                entry = tk.Text(dialog, width=40, height=3, wrap=tk.WORD, font=('Helvetica', 10))
+                entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+            else:
+                entry = ttk.Entry(dialog, width=42, font=('Helvetica', 10))
+                entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+            entries[key] = entry
+            dialog.columnconfigure(1, weight=1)
+        
+        entries['name'].focus()
+        
+        def save():
+            name = entries['name'].get().strip() if isinstance(entries['name'], tk.Text) else entries['name'].get().strip()
+            if isinstance(entries['document_no'], tk.Text):
+                document_no = entries['document_no'].get("1.0", tk.END).strip()
+            else:
+                document_no = entries['document_no'].get().strip()
+            if isinstance(entries['address'], tk.Text):
+                address = entries['address'].get("1.0", tk.END).strip()
+            else:
+                address = entries['address'].get().strip()
+            
+            if not name:
+                messagebox.showerror("Error", "Blaster name is required")
+                return
+            try:
+                self.db.add_blaster(name, document_no, address)
+                messagebox.showinfo("Success", "Blaster added successfully")
+                self.refresh_tree()
+                if self.callback:
+                    self.callback()
+                dialog.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to add blaster: {str(e)}")
+        
+        ttk.Button(dialog, text="Save", command=save, width=12).grid(row=len(fields), column=0, columnspan=2, pady=20)
+        entries['name'].bind('<Return>', lambda e: entries['document_no'].focus())
+    
+    def edit_blaster(self):
+        """Edit selected blaster"""
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a blaster to edit")
+            return
+        
+        blaster_id = self.tree.item(selection[0])['values'][0]
+        blaster = self.db.get_blaster(blaster_id)
+        if not blaster:
+            messagebox.showerror("Error", "Blaster not found")
+            return
+        
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Edit Blaster")
+        dialog.geometry("520x280")
+        dialog.transient(self.window)
+        dialog.grab_set()
+        
+        # Make visible on macOS
+        dialog.lift()
+        dialog.focus_force()
+        dialog.attributes('-topmost', True)
+        dialog.after(100, lambda: dialog.attributes('-topmost', False))
+        
+        fields = [
+            ("Name *", "name"),
+            ("Document No", "document_no"),
+            ("Address", "address")
+        ]
+        
+        entries = {}
+        for idx, (label, key) in enumerate(fields):
+            ttk.Label(dialog, text=label, font=('Helvetica', 10)).grid(row=idx, column=0, padx=15, pady=8, sticky=tk.W)
+            if key == 'address':
+                entry = tk.Text(dialog, width=40, height=3, wrap=tk.WORD, font=('Helvetica', 10))
+                entry.insert("1.0", blaster.get(key, ''))
+                entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+            else:
+                entry = ttk.Entry(dialog, width=42, font=('Helvetica', 10))
+                entry.insert(0, blaster.get(key, ''))
+                entry.grid(row=idx, column=1, padx=15, pady=8, sticky=(tk.W, tk.E))
+            entries[key] = entry
+            dialog.columnconfigure(1, weight=1)
+        
+        entries['name'].focus()
+        entries['name'].select_range(0, tk.END)
+        
+        def save():
+            name = entries['name'].get().strip() if isinstance(entries['name'], tk.Text) else entries['name'].get().strip()
+            if isinstance(entries['document_no'], tk.Text):
+                document_no = entries['document_no'].get("1.0", tk.END).strip()
+            else:
+                document_no = entries['document_no'].get().strip()
+            if isinstance(entries['address'], tk.Text):
+                address = entries['address'].get("1.0", tk.END).strip()
+            else:
+                address = entries['address'].get().strip()
+            
+            if not name:
+                messagebox.showerror("Error", "Blaster name is required")
+                return
+            try:
+                self.db.update_blaster(blaster_id, name, document_no, address)
+                messagebox.showinfo("Success", "Blaster updated successfully")
+                self.refresh_tree()
+                if self.callback:
+                    self.callback()
+                dialog.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to update blaster: {str(e)}")
+        
+        ttk.Button(dialog, text="Save", command=save, width=12).grid(row=len(fields), column=0, columnspan=2, pady=20)
+        entries['name'].bind('<Return>', lambda e: entries['document_no'].focus())
+    
+    def delete_blaster(self):
+        """Delete selected blaster"""
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a blaster to delete")
+            return
+        
+        blaster_id = self.tree.item(selection[0])['values'][0]
+        blaster_name = self.tree.item(selection[0])['values'][1]
+        
+        if messagebox.askyesno("Confirm", 
+                               f"Delete blaster '{blaster_name}'?\n\nCustomers using this blaster will have their blaster reference removed."):
+            try:
+                self.db.delete_blaster(blaster_id)
+                messagebox.showinfo("Success", "Blaster deleted successfully")
+                self.refresh_tree()
+                if self.callback:
+                    self.callback()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete blaster: {str(e)}")
 
 
 if __name__ == "__main__":

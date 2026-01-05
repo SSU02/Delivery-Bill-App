@@ -10,6 +10,17 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from datetime import datetime
 from typing import List, Dict
+import os
+import tempfile
+
+try:
+    from pypdf import PdfWriter, PdfReader
+except ImportError:
+    try:
+        from PyPDF2 import PdfWriter, PdfFileReader as PdfReader
+    except ImportError:
+        PdfWriter = None
+        PdfReader = None
 
 class PDFGenerator:
     def __init__(self):
@@ -62,6 +73,18 @@ class PDFGenerator:
         
         story = []
         
+        # Use the helper method to build the table (same format as multi-page)
+        main_table = self._build_invoice_table(invoice_data)
+        story.append(main_table)
+        
+        # Build PDF
+        doc.build(story)
+    
+    def _build_invoice_table(self, invoice_data: Dict):
+        """
+        Build the invoice table for a single customer - extracted from generate_pdf
+        Returns the table with exact same format as original
+        """
         # Get all data
         invoice_no = invoice_data.get('invoice_number', '')
         mode_transport = invoice_data.get('mode_of_transport', 'Road')
@@ -76,11 +99,11 @@ class PDFGenerator:
         customer = invoice_data.get('customer', {})
         place_of_supply = invoice_data.get('place_of_supply', '')
         state_code = invoice_data.get('state_code', '33')
-        gstin_unique = invoice_data.get('gstin_unique_id', '')  # GSTIN/Unique ID from invoice details (not customer GSTIN)
+        gstin_unique = invoice_data.get('gstin_unique_id', '')
         
         items = invoice_data.get('items', [])
         
-        # Build ONE BIG TABLE with all rows
+        # Build ONE BIG TABLE with all rows - EXACT SAME AS ORIGINAL
         main_table_data = []
         
         # Row 0: Title - DELIVERY CHALLAN (smaller font)
@@ -485,7 +508,56 @@ class PDFGenerator:
         
         main_table.setStyle(TableStyle(style_list))
         
-        story.append(main_table)
+        return main_table
+    
+    def generate_multi_page_pdf(self, invoice_data_list: List[Dict], output_path: str):
+        """
+        Generate a single PDF with multiple pages, one page per customer
+        This method generates individual PDFs first (using the exact same format as generate_pdf),
+        then merges them into a single multi-page PDF to ensure perfect formatting match.
+        """
+        if PdfWriter is None or PdfReader is None:
+            raise ImportError("pypdf or PyPDF2 is required for PDF merging. Please install it: pip install pypdf")
         
-        # Build PDF
-        doc.build(story)
+        # Create temporary directory for individual PDFs
+        temp_dir = tempfile.mkdtemp()
+        temp_pdf_files = []
+        
+        try:
+            # Generate individual PDF for each customer (using exact same method as single PDF)
+            for idx, invoice_data in enumerate(invoice_data_list):
+                # Create temporary file for this customer's PDF
+                temp_pdf_path = os.path.join(temp_dir, f"temp_invoice_{idx}.pdf")
+                temp_pdf_files.append(temp_pdf_path)
+                
+                # Generate PDF using the exact same method as single PDF generation
+                self.generate_pdf(invoice_data, temp_pdf_path)
+            
+            # Merge all PDFs into one
+            pdf_writer = PdfWriter()
+            
+            for temp_pdf_path in temp_pdf_files:
+                if os.path.exists(temp_pdf_path):
+                    pdf_reader = PdfReader(temp_pdf_path)
+                    # Add all pages from this PDF
+                    for page_num in range(len(pdf_reader.pages)):
+                        pdf_writer.add_page(pdf_reader.pages[page_num])
+            
+            # Write merged PDF to output path
+            with open(output_path, 'wb') as output_file:
+                pdf_writer.write(output_file)
+        
+        finally:
+            # Clean up temporary files
+            for temp_pdf_path in temp_pdf_files:
+                try:
+                    if os.path.exists(temp_pdf_path):
+                        os.remove(temp_pdf_path)
+                except Exception:
+                    pass
+            
+            # Remove temporary directory
+            try:
+                os.rmdir(temp_dir)
+            except Exception:
+                pass
