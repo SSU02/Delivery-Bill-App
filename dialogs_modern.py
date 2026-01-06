@@ -668,10 +668,18 @@ class LicenseActivationDialog(ModernDialog):
         super().__init__("Activate License", parent)
         self.hardware_id = hardware_id
         self.setMinimumWidth(600)
+        self.setMinimumHeight(500)
+        self.resize(650, 550)
+        
         self.setup_ui()
+        
+        # macOS-specific: Ensure dialog is visible and on top
+        self.raise_()
+        self.activateWindow()
     
     def setup_ui(self):
-        layout = QVBoxLayout()
+        # Use the base class layout instead of creating a new one
+        layout = self.layout
         layout.setSpacing(15)
         layout.setContentsMargins(30, 30, 30, 30)
         
@@ -762,7 +770,7 @@ class LicenseActivationDialog(ModernDialog):
         btn_layout.addWidget(btn_activate)
         layout.addLayout(btn_layout)
         
-        self.setLayout(layout)
+        # Layout is already set by base class, no need to set it again
     
     def format_license_key(self, text):
         """Format license key with dashes"""

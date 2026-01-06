@@ -1465,6 +1465,9 @@ def main():
         # Show activation dialog
         hardware_id = license_manager.get_hardware_id()
         activation_dialog = LicenseActivationDialog(hardware_id)
+        activation_dialog.setModal(True)
+        activation_dialog.raise_()
+        activation_dialog.activateWindow()
         
         if activation_dialog.exec() != DIALOG_ACCEPTED:
             # User didn't activate, exit

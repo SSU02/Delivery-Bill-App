@@ -8,8 +8,15 @@ import os
 import json
 import base64
 from datetime import datetime, timedelta
-from cryptography.fernet import Fernet
 import sys
+
+# Try to import cryptography, but handle if it's not available
+try:
+    from cryptography.fernet import Fernet
+    CRYPTOGRAPHY_AVAILABLE = True
+except ImportError:
+    CRYPTOGRAPHY_AVAILABLE = False
+    Fernet = None
 
 class LicenseManager:
     """Manages application licensing and activation"""
@@ -54,44 +61,74 @@ class LicenseManager:
     
     def _encrypt_data(self, data):
         """Encrypt license data"""
-        try:
-            f = Fernet(self.encryption_key)
-            encrypted = f.encrypt(data.encode())
-            return base64.b64encode(encrypted).decode()
-        except Exception:
-            # Fallback: simple encoding if cryptography fails
+        if CRYPTOGRAPHY_AVAILABLE:
+            try:
+                f = Fernet(self.encryption_key)
+                encrypted = f.encrypt(data.encode())
+                return base64.b64encode(encrypted).decode()
+            except Exception:
+                # Fallback: simple encoding if cryptography fails
+                return base64.b64encode(data.encode()).decode()
+        else:
+            # Fallback: simple encoding if cryptography not available
             return base64.b64encode(data.encode()).decode()
     
     def _decrypt_data(self, encrypted_data):
         """Decrypt license data"""
-        try:
-            f = Fernet(self.encryption_key)
-            decoded = base64.b64decode(encrypted_data.encode())
-            decrypted = f.decrypt(decoded)
-            return decrypted.decode()
-        except Exception:
-            # Fallback: simple decoding
+        if CRYPTOGRAPHY_AVAILABLE:
+            try:
+                f = Fernet(self.encryption_key)
+                decoded = base64.b64decode(encrypted_data.encode())
+                decrypted = f.decrypt(decoded)
+                return decrypted.decode()
+            except Exception:
+                # Fallback: simple decoding
+                try:
+                    return base64.b64decode(encrypted_data.encode()).decode()
+                except:
+                    return None
+        else:
+            # Fallback: simple decoding if cryptography not available
             try:
                 return base64.b64decode(encrypted_data.encode()).decode()
             except:
                 return None
     
-    def generate_license_key(self, hardware_id=None, days_valid=365):
-        """Generate a license key for a specific hardware ID"""
+    def generate_license_key(self, hardware_id=None, days_valid=365, forever=False):
+        """Generate a license key for a specific hardware ID
+        
+        Args:
+            hardware_id: Hardware ID (uses current if None)
+            days_valid: Number of days valid (ignored if forever=True)
+            forever: If True, creates a license that never expires
+        """
         if hardware_id is None:
             hardware_id = self.hardware_id
         
         # Create license data
-        expiry_date = (datetime.now() + timedelta(days=days_valid)).strftime("%Y-%m-%d")
-        license_data = {
-            'hardware_id': hardware_id,
-            'expiry_date': expiry_date,
-            'issued_date': datetime.now().strftime("%Y-%m-%d"),
-            'days_valid': days_valid
-        }
+        if forever:
+            expiry_date = "9999-12-31"  # Far future date (effectively forever)
+            days_valid = 999999  # Special value for forever
+            license_data = {
+                'hardware_id': hardware_id,
+                'expiry_date': expiry_date,
+                'issued_date': datetime.now().strftime("%Y-%m-%d"),
+                'days_valid': days_valid,
+                'forever': True
+            }
+            # Use special marker for forever licenses
+            key_string = f"{hardware_id}FOREVERDeliveryBillApp2024"
+        else:
+            expiry_date = (datetime.now() + timedelta(days=days_valid)).strftime("%Y-%m-%d")
+            license_data = {
+                'hardware_id': hardware_id,
+                'expiry_date': expiry_date,
+                'issued_date': datetime.now().strftime("%Y-%m-%d"),
+                'days_valid': days_valid,
+                'forever': False
+            }
+            key_string = f"{hardware_id}{expiry_date}DeliveryBillApp2024"
         
-        # Create a hash-based key
-        key_string = f"{hardware_id}{expiry_date}DeliveryBillApp2024"
         license_key = hashlib.sha256(key_string.encode()).hexdigest()[:32].upper()
         
         # Format as XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX
@@ -107,6 +144,23 @@ class LicenseManager:
         if len(clean_key) != 32:
             return False, "Invalid license key format"
         
+        # First check for forever license
+        forever_key_string = f"{self.hardware_id}FOREVERDeliveryBillApp2024"
+        expected_forever_key = hashlib.sha256(forever_key_string.encode()).hexdigest()[:32].upper()
+        
+        if clean_key == expected_forever_key:
+            # Forever license found, save it
+            license_data = {
+                'hardware_id': self.hardware_id,
+                'expiry_date': "9999-12-31",
+                'activated_date': datetime.now().strftime("%Y-%m-%d"),
+                'license_key': license_key,
+                'forever': True,
+                'days_valid': 999999
+            }
+            self.save_license(license_data)
+            return True, "Forever license activated! License never expires."
+        
         # Try different expiry dates (up to 10 years)
         for days in range(30, 3650, 30):  # Check every 30 days up to 10 years
             expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
@@ -119,7 +173,9 @@ class LicenseManager:
                     'hardware_id': self.hardware_id,
                     'expiry_date': expiry_date,
                     'activated_date': datetime.now().strftime("%Y-%m-%d"),
-                    'license_key': license_key
+                    'license_key': license_key,
+                    'forever': False,
+                    'days_valid': days
                 }
                 self.save_license(license_data)
                 return True, f"License activated! Valid until {expiry_date}"
@@ -167,7 +223,11 @@ class LicenseManager:
         if license_data.get('hardware_id') != self.hardware_id:
             return False, "License is not valid for this computer. Please contact support."
         
-        # Check expiry date
+        # Check if it's a forever license
+        if license_data.get('forever', False):
+            return True, "Forever license - Never expires!"
+        
+        # Check expiry date for regular licenses
         try:
             expiry_date = datetime.strptime(license_data.get('expiry_date', ''), "%Y-%m-%d")
             if datetime.now() > expiry_date:
@@ -193,24 +253,27 @@ class LicenseManager:
         return None
 
 
-def generate_license_for_client(hardware_id, days_valid=365):
+def generate_license_for_client(hardware_id, days_valid=365, forever=False):
     """
     Standalone function to generate license keys for clients
-    Usage: python license_manager.py <hardware_id> [days_valid]
+    Usage: python license_manager.py <hardware_id> [days_valid] [--forever]
     """
     manager = LicenseManager()
     if hardware_id:
-        license_key, license_data = manager.generate_license_key(hardware_id, days_valid)
+        license_key, license_data = manager.generate_license_key(hardware_id, days_valid, forever)
     else:
-        license_key, license_data = manager.generate_license_key(days_valid=days_valid)
+        license_key, license_data = manager.generate_license_key(days_valid=days_valid, forever=forever)
     
     print("\n" + "="*60)
     print("LICENSE KEY GENERATED")
     print("="*60)
     print(f"Hardware ID: {license_data['hardware_id']}")
     print(f"License Key: {license_key}")
-    print(f"Valid Until: {license_data['expiry_date']}")
-    print(f"Days Valid: {license_data['days_valid']}")
+    if license_data.get('forever', False):
+        print(f"Type: FOREVER (Never expires)")
+    else:
+        print(f"Valid Until: {license_data['expiry_date']}")
+        print(f"Days Valid: {license_data['days_valid']}")
     print("="*60 + "\n")
     
     return license_key, license_data
@@ -220,8 +283,12 @@ if __name__ == "__main__":
     # Command-line tool for generating license keys
     if len(sys.argv) > 1:
         hardware_id = sys.argv[1].upper()
-        days_valid = int(sys.argv[2]) if len(sys.argv) > 2 else 365
-        generate_license_for_client(hardware_id, days_valid)
+        # Check for --forever flag
+        if '--forever' in sys.argv or '-f' in sys.argv:
+            generate_license_for_client(hardware_id, forever=True)
+        else:
+            days_valid = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] not in ['--forever', '-f'] else 365
+            generate_license_for_client(hardware_id, days_valid)
     else:
         # Interactive mode
         print("License Key Generator")
@@ -232,8 +299,11 @@ if __name__ == "__main__":
             hardware_id = manager.get_hardware_id()
             print(f"Using current machine Hardware ID: {hardware_id}")
         
-        days_input = input("Enter days valid (default 365): ").strip()
-        days_valid = int(days_input) if days_input else 365
-        
-        generate_license_for_client(hardware_id, days_valid)
+        forever_input = input("Forever license? (y/n, default n): ").strip().lower()
+        if forever_input == 'y':
+            generate_license_for_client(hardware_id, forever=True)
+        else:
+            days_input = input("Enter days valid (default 365): ").strip()
+            days_valid = int(days_input) if days_input else 365
+            generate_license_for_client(hardware_id, days_valid)
 

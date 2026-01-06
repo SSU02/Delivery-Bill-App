@@ -1,0 +1,14 @@
+name: delivery-bill
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pip
+  - pip:
+      - pyqt5==5.15.11
+      - reportlab==4.0.7
+      - pypdf>=3.0.0
+      - cryptography>=41.0.0
+      - tkcalendar==1.6.1
+      - pyinstaller  # Optional: for building executables
