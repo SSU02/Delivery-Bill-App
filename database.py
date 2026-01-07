@@ -236,12 +236,79 @@ class Database:
         
         conn.commit()
         conn.close()
+        
+        # Migrate existing customer data to uppercase
+        self.migrate_customers_to_uppercase()
+        
+        # Clean up orphaned blaster references
+        self.cleanup_orphaned_blaster_references()
+    
+    def migrate_customers_to_uppercase(self):
+        """Migrate all existing customer data to uppercase"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Get all customers
+            cursor.execute("SELECT id, name, address, sf_no, rc_no, state, gstin FROM customers")
+            customers = cursor.fetchall()
+            
+            # Update each customer to uppercase
+            for customer in customers:
+                customer_id = customer[0]
+                name = customer[1].upper() if customer[1] else ""
+                address = customer[2].upper() if customer[2] else ""
+                sf_no = customer[3].upper() if customer[3] else ""
+                rc_no = customer[4].upper() if customer[4] else ""
+                state = customer[5].upper() if customer[5] else ""
+                gstin = customer[6].upper() if customer[6] else ""
+                
+                cursor.execute("""
+                    UPDATE customers 
+                    SET name = ?, address = ?, sf_no = ?, rc_no = ?, state = ?, gstin = ?
+                    WHERE id = ?
+                """, (name, address, sf_no, rc_no, state, gstin, customer_id))
+            
+            conn.commit()
+        except Exception as e:
+            # Migration failed, but continue
+            conn.rollback()
+            pass
+        finally:
+            conn.close()
+    
+    def cleanup_orphaned_blaster_references(self):
+        """Clean up any orphaned blaster_id references in customers table"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Find customers with blaster_id that doesn't exist in blasters table
+            cursor.execute("""
+                UPDATE customers 
+                SET blaster_id = NULL 
+                WHERE blaster_id IS NOT NULL 
+                AND blaster_id NOT IN (SELECT id FROM blasters)
+            """)
+            conn.commit()
+        except Exception as e:
+            # Cleanup failed, but continue
+            conn.rollback()
+            pass
+        finally:
+            conn.close()
     
     # Customer operations
     def add_customer(self, name: str, address: str = "", sf_no: str = "", 
                      rc_no: str = "", state: str = "", gstin: str = "", 
                      blaster_id: int = None, location_id: int = None) -> int:
-        """Add a new customer"""
+        """Add a new customer - convert all text fields to uppercase"""
+        # Convert all text fields to uppercase
+        name = name.upper() if name else ""
+        address = address.upper() if address else ""
+        sf_no = sf_no.upper() if sf_no else ""
+        rc_no = rc_no.upper() if rc_no else ""
+        state = state.upper() if state else ""
+        gstin = gstin.upper() if gstin else ""
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -260,7 +327,9 @@ class Database:
         cursor = conn.cursor()
         if location_id is not None:
             cursor.execute("""
-                SELECT c.*, b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
+                SELECT c.id, c.name, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
+                       c.blaster_id, c.location_id, c.created_at,
+                       b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
                 FROM customers c
                 LEFT JOIN blasters b ON c.blaster_id = b.id
                 WHERE c.location_id = ?
@@ -268,7 +337,9 @@ class Database:
             """, (location_id,))
         else:
             cursor.execute("""
-                SELECT c.*, b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
+                SELECT c.id, c.name, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
+                       c.blaster_id, c.location_id, c.created_at,
+                       b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
                 FROM customers c
                 LEFT JOIN blasters b ON c.blaster_id = b.id
                 ORDER BY c.name ASC
@@ -282,7 +353,9 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT c.*, b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
+            SELECT c.id, c.name, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
+                   c.blaster_id, c.location_id, c.created_at,
+                   b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
             FROM customers c
             LEFT JOIN blasters b ON c.blaster_id = b.id
             WHERE c.id = ?
@@ -304,7 +377,15 @@ class Database:
     def update_customer(self, customer_id: int, name: str, address: str = "",
                        sf_no: str = "", rc_no: str = "", state: str = "", gstin: str = "",
                        blaster_id: int = None, location_id: int = None):
-        """Update customer details"""
+        """Update customer details - convert all text fields to uppercase"""
+        # Convert all text fields to uppercase
+        name = name.upper() if name else ""
+        address = address.upper() if address else ""
+        sf_no = sf_no.upper() if sf_no else ""
+        rc_no = rc_no.upper() if rc_no else ""
+        state = state.upper() if state else ""
+        gstin = gstin.upper() if gstin else ""
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -510,15 +591,15 @@ class Database:
         cursor = conn.cursor()
         
         try:
-            # Get all goods ordered alphabetically by description
-            cursor.execute("SELECT id, description, hsn_code, unit, rate, created_at, updated_at FROM goods ORDER BY description ASC")
+            # Get all goods ordered alphabetically by description (include category)
+            cursor.execute("SELECT id, description, hsn_code, unit, rate, category, created_at, updated_at FROM goods ORDER BY description ASC")
             goods = cursor.fetchall()
             
             if not goods:
                 conn.close()
                 return
             
-            # Create temporary table
+            # Create temporary table (include category column)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS goods_temp (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -526,18 +607,19 @@ class Database:
                     hsn_code TEXT NOT NULL,
                     unit TEXT NOT NULL,
                     rate REAL NOT NULL,
+                    category TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
-            # Insert goods in alphabetical order with new IDs (1, 2, 3, ...)
+            # Insert goods in alphabetical order with new IDs (1, 2, 3, ...) (include category)
             cursor.execute("DELETE FROM goods_temp")
-            for new_id, (old_id, description, hsn_code, unit, rate, created_at, updated_at) in enumerate(goods, 1):
+            for new_id, (old_id, description, hsn_code, unit, rate, category, created_at, updated_at) in enumerate(goods, 1):
                 cursor.execute("""
-                    INSERT INTO goods_temp (id, description, hsn_code, unit, rate, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (new_id, description, hsn_code, unit, rate, created_at, updated_at))
+                    INSERT INTO goods_temp (id, description, hsn_code, unit, rate, category, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (new_id, description, hsn_code, unit, rate, category, created_at, updated_at))
             
             # Drop old table and rename new one
             cursor.execute("DROP TABLE goods")
@@ -579,6 +661,22 @@ class Database:
         vehicles = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return vehicles
+    
+    def update_vehicle(self, vehicle_id: int, vehicle_number: str):
+        """Update vehicle number"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                UPDATE vehicles
+                SET vehicle_number = ?
+                WHERE id = ?
+            """, (vehicle_number, vehicle_id))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.close()
+            raise ValueError(f"Vehicle '{vehicle_number}' already exists")
+        conn.close()
     
     def delete_vehicle(self, vehicle_id: int):
         """Delete a vehicle"""
@@ -638,17 +736,24 @@ class Database:
         """Delete a blaster (sets customer blaster_id to NULL if they reference it)"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        # Set customers' blaster_id to NULL if they reference this blaster
-        cursor.execute("UPDATE customers SET blaster_id = NULL WHERE blaster_id = ?", (blaster_id,))
-        # Delete the blaster
-        cursor.execute("DELETE FROM blasters WHERE id = ?", (blaster_id,))
-        conn.commit()
-        conn.close()
-        # Renumber IDs after deletion
+        try:
+            # Set customers' blaster_id to NULL if they reference this blaster
+            cursor.execute("UPDATE customers SET blaster_id = NULL WHERE blaster_id = ?", (blaster_id,))
+            # Delete the blaster
+            cursor.execute("DELETE FROM blasters WHERE id = ?", (blaster_id,))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        
+        # Renumber IDs after deletion (this will update customer references properly)
         self.renumber_blasters()
     
     def renumber_blasters(self):
-        """Renumber blaster IDs to be sequential (1, 2, 3...) based on alphabetical order"""
+        """Renumber blaster IDs to be sequential (1, 2, 3...) based on alphabetical order.
+        Properly updates all customer references to maintain data integrity."""
         conn = self.get_connection()
         cursor = conn.cursor()
         
@@ -682,19 +787,32 @@ class Database:
                     VALUES (?, ?, ?, ?, ?)
                 """, (new_id, name, document_no, address, created_at))
             
-            # Update customers table to use new blaster IDs
+            # Update customers table to use new blaster IDs (only if mapping exists)
             for old_id, new_id in id_mapping.items():
-                cursor.execute("UPDATE customers SET blaster_id = ? WHERE blaster_id = ?", (new_id, old_id))
+                if old_id != new_id:  # Only update if ID actually changed
+                    cursor.execute("UPDATE customers SET blaster_id = ? WHERE blaster_id = ?", (new_id, old_id))
             
             # Drop old table and rename new one
             cursor.execute("DROP TABLE blasters")
             cursor.execute("ALTER TABLE blasters_temp RENAME TO blasters")
             
             conn.commit()
+            
+            # Clean up any orphaned references after renumbering
+            cursor.execute("""
+                UPDATE customers 
+                SET blaster_id = NULL 
+                WHERE blaster_id IS NOT NULL 
+                AND blaster_id NOT IN (SELECT id FROM blasters)
+            """)
+            conn.commit()
+            
             conn.close()
         except Exception as e:
             conn.rollback()
             conn.close()
+            # Don't fail silently - log the error
+            print(f"Error renumbering blasters: {e}")
             pass
     
     # Goods operations
@@ -716,7 +834,10 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         if category:
-            cursor.execute("SELECT * FROM goods WHERE category = ? ORDER BY description ASC", (category,))
+            cursor.execute(
+                "SELECT * FROM goods WHERE category = ? ORDER BY description ASC",
+                (category,),
+            )
         else:
             cursor.execute("SELECT * FROM goods ORDER BY description ASC")
         goods = [dict(row) for row in cursor.fetchall()]

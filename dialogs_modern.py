@@ -10,8 +10,8 @@ try:
         QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
         QListWidget, QListWidgetItem
     )
-    from PyQt5.QtCore import Qt, pyqtSignal
-    from PyQt5.QtGui import QFont
+    from PyQt5.QtCore import Qt, pyqtSignal, QEvent
+    from PyQt5.QtGui import QFont, QWheelEvent
     PYQT_VERSION = 5
     DIALOG_ACCEPTED = QDialog.Accepted
 except ImportError:
@@ -22,11 +22,22 @@ except ImportError:
         QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
         QListWidget, QListWidgetItem
     )
-    from PyQt6.QtCore import Qt, pyqtSignal
-    from PyQt6.QtGui import QFont
+    from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+    from PyQt6.QtGui import QFont, QWheelEvent
     PYQT_VERSION = 6
     DIALOG_ACCEPTED = QDialog.DialogCode.Accepted
 from database import Database
+
+
+class NoWheelComboBox(QComboBox):
+    """QComboBox that only responds to wheel events when focused/clicked"""
+    def wheelEvent(self, event: QWheelEvent):
+        # Only process wheel events if the combo box is focused
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            # Ignore wheel events when not focused
+            event.ignore()
 
 
 class ModernDialog(QDialog):
@@ -215,16 +226,28 @@ class AddCustomerDialog(ModernDialog):
             row_layout.addWidget(QLabel(label))
             entry = QLineEdit()
             if customer:
-                entry.setText(customer.get(key, ''))
+                # Display in uppercase
+                entry.setText(customer.get(key, '').upper() if customer.get(key) else '')
             elif key == 'state':
-                entry.setText('Tamilnadu')
+                entry.setText('TAMILNADU')
             elif key == 'address' and area_id:
                 # Get area name
                 areas = db.get_locations()
                 area = next((a for a in areas if a['id'] == area_id), None)
                 if area:
-                    entry.setText(area['name'])
+                    entry.setText(area['name'].upper() if area.get('name') else '')
             entry.setPlaceholderText(f"Enter {label.lower()}")
+            # Convert to uppercase when editing is finished
+            if key in ['name', 'address', 'sf_no', 'rc_no', 'state', 'gstin']:
+                def make_upper():
+                    current_text = entry.text()
+                    cursor_pos = entry.cursorPosition()
+                    upper_text = current_text.upper()
+                    if current_text != upper_text:
+                        entry.setText(upper_text)
+                        # Restore cursor position
+                        entry.setCursorPosition(min(cursor_pos, len(upper_text)))
+                entry.editingFinished.connect(make_upper)
             self.entries[key] = entry
             row_layout.addWidget(entry)
             self.layout.addLayout(row_layout)
@@ -232,7 +255,7 @@ class AddCustomerDialog(ModernDialog):
         # Blaster selection
         blaster_layout = QHBoxLayout()
         blaster_layout.addWidget(QLabel("Blaster:"))
-        self.blaster_combo = QComboBox()
+        self.blaster_combo = NoWheelComboBox()
         blasters = db.get_blasters()
         self.blaster_combo.addItem("", None)
         for blaster in blasters:
@@ -274,13 +297,20 @@ class AddCustomerDialog(ModernDialog):
                 self.blaster_combo.addItem(blaster['name'], blaster['id'])
     
     def save(self):
-        """Save the customer"""
-        name = self.entries['name'].text().strip()
+        """Save the customer - convert all text fields to uppercase"""
+        name = self.entries['name'].text().strip().upper()
         if not name:
             QMessageBox.warning(self, "Error", "Customer name is required")
             return
         
         blaster_id = self.blaster_combo.currentData()
+        
+        # Convert all text fields to uppercase
+        address = self.entries['address'].text().strip().upper()
+        sf_no = self.entries['sf_no'].text().strip().upper()
+        rc_no = self.entries['rc_no'].text().strip().upper()
+        state = self.entries['state'].text().strip().upper()
+        gstin = self.entries['gstin'].text().strip().upper()
         
         try:
             if self.customer:
@@ -288,11 +318,11 @@ class AddCustomerDialog(ModernDialog):
                 self.db.update_customer(
                     self.customer['id'],
                     name,
-                    self.entries['address'].text().strip(),
-                    self.entries['sf_no'].text().strip(),
-                    self.entries['rc_no'].text().strip(),
-                    self.entries['state'].text().strip(),
-                    self.entries['gstin'].text().strip(),
+                    address,
+                    sf_no,
+                    rc_no,
+                    state,
+                    gstin,
                     blaster_id,
                     self.area_id
                 )
@@ -301,11 +331,11 @@ class AddCustomerDialog(ModernDialog):
                 # Add
                 self.db.add_customer(
                     name,
-                    self.entries['address'].text().strip(),
-                    self.entries['sf_no'].text().strip(),
-                    self.entries['rc_no'].text().strip(),
-                    self.entries['state'].text().strip(),
-                    self.entries['gstin'].text().strip(),
+                    address,
+                    sf_no,
+                    rc_no,
+                    state,
+                    gstin,
                     blaster_id,
                     self.area_id
                 )
@@ -383,53 +413,179 @@ class AddGoodDialog(ModernDialog):
         self.category = category
         self.item_data = None
         
-        # Good selection (filtered by category)
+        field_width = 250
+        
+        # Good selection (filtered by category) - styled like area/vehicle
         good_layout = QHBoxLayout()
-        good_layout.addWidget(QLabel("Select Good:"))
-        self.good_combo = QComboBox()
+        good_label = QLabel("Good description:")
+        good_label.setMinimumWidth(120)
+        good_layout.addWidget(good_label)
+        
+        self.good_combo = NoWheelComboBox()
+        self.good_combo.setMinimumWidth(field_width)
+        self.good_combo.setMaximumWidth(field_width)
+        self.good_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #ced4da;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: white;
+            }
+            QComboBox:focus {
+                border: 2px solid #007bff;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 0px;
+                background: transparent;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border: none;
+            }
+        """)
         goods = db.get_goods(category=category) if category else db.get_goods()
-        self.good_combo.addItem("", None)
+        self.good_combo.addItem("--Select Good--", None)
         for good in goods:
             self.good_combo.addItem(f"{good['description']} ({good['hsn_code']})", good)
         self.good_combo.currentIndexChanged.connect(self.on_good_selected)
         good_layout.addWidget(self.good_combo)
+        
         btn_new_good = QPushButton("+ New Good")
-        btn_new_good.setStyleSheet("background-color: #28a745; color: white; padding: 5px 10px;")
+        btn_new_good.setStyleSheet("background-color: #28a745; color: white; padding: 8px 15px; border-radius: 4px;")
         btn_new_good.clicked.connect(self.add_new_good)
         good_layout.addWidget(btn_new_good)
+        good_layout.addStretch()
         self.layout.addLayout(good_layout)
         
-        # Tax rate editing
-        tax_layout = QHBoxLayout()
-        tax_layout.addWidget(QLabel("CGST Rate %:"))
+        # Tax rate editing - styled like Manage Goods Rate field
+        # CGST Rate
+        cgst_layout = QHBoxLayout()
+        cgst_label = QLabel("CGST Rate %:")
+        cgst_label.setMinimumWidth(120)
+        cgst_layout.addWidget(cgst_label)
         self.cgst_spin = QDoubleSpinBox()
         self.cgst_spin.setMinimum(0)
         self.cgst_spin.setMaximum(100)
         self.cgst_spin.setValue(default_cgst_rate)
         self.cgst_spin.setDecimals(2)
+        self.cgst_spin.setMinimumWidth(field_width)
+        self.cgst_spin.setMaximumWidth(field_width)
+        self.cgst_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 8px;
+                border: 2px solid #ced4da;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: white;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid #007bff;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                width: 20px;
+            }
+        """)
         self.cgst_spin.valueChanged.connect(self.calculate)
-        tax_layout.addWidget(self.cgst_spin)
+        cgst_layout.addWidget(self.cgst_spin)
+        cgst_layout.addStretch()
+        self.layout.addLayout(cgst_layout)
         
-        tax_layout.addWidget(QLabel("SGST Rate %:"))
+        # SGST Rate
+        sgst_layout = QHBoxLayout()
+        sgst_label = QLabel("SGST Rate %:")
+        sgst_label.setMinimumWidth(120)
+        sgst_layout.addWidget(sgst_label)
         self.sgst_spin = QDoubleSpinBox()
         self.sgst_spin.setMinimum(0)
         self.sgst_spin.setMaximum(100)
         self.sgst_spin.setValue(default_sgst_rate)
         self.sgst_spin.setDecimals(2)
+        self.sgst_spin.setMinimumWidth(field_width)
+        self.sgst_spin.setMaximumWidth(field_width)
+        self.sgst_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 8px;
+                border: 2px solid #ced4da;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: white;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid #007bff;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                width: 20px;
+            }
+        """)
         self.sgst_spin.valueChanged.connect(self.calculate)
-        tax_layout.addWidget(self.sgst_spin)
-        self.layout.addLayout(tax_layout)
+        sgst_layout.addWidget(self.sgst_spin)
+        sgst_layout.addStretch()
+        self.layout.addLayout(sgst_layout)
         
-        # Quantity
+        # IGST Rate (empty by default)
+        igst_layout = QHBoxLayout()
+        igst_label = QLabel("IGST Rate %:")
+        igst_label.setMinimumWidth(120)
+        igst_layout.addWidget(igst_label)
+        self.igst_spin = QDoubleSpinBox()
+        self.igst_spin.setMinimum(0)
+        self.igst_spin.setMaximum(100)
+        self.igst_spin.setValue(0)  # Empty by default
+        self.igst_spin.setDecimals(2)
+        self.igst_spin.setMinimumWidth(field_width)
+        self.igst_spin.setMaximumWidth(field_width)
+        self.igst_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 8px;
+                border: 2px solid #ced4da;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: white;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid #007bff;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                width: 20px;
+            }
+        """)
+        self.igst_spin.valueChanged.connect(self.calculate)
+        igst_layout.addWidget(self.igst_spin)
+        igst_layout.addStretch()
+        self.layout.addLayout(igst_layout)
+        
+        # Quantity - styled like Rate fields
         qty_layout = QHBoxLayout()
-        qty_layout.addWidget(QLabel("Quantity:"))
+        qty_label = QLabel("Quantity:")
+        qty_label.setMinimumWidth(120)
+        qty_layout.addWidget(qty_label)
         self.qty_spin = QDoubleSpinBox()
         self.qty_spin.setMinimum(0.01)
         self.qty_spin.setMaximum(999999)
         self.qty_spin.setValue(1.0)
         self.qty_spin.setDecimals(2)
+        self.qty_spin.setMinimumWidth(field_width)
+        self.qty_spin.setMaximumWidth(field_width)
+        self.qty_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 8px;
+                border: 2px solid #ced4da;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: white;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid #007bff;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                width: 20px;
+            }
+        """)
         self.qty_spin.valueChanged.connect(self.calculate)
         qty_layout.addWidget(self.qty_spin)
+        qty_layout.addStretch()
         self.layout.addLayout(qty_layout)
         
         # Display selected good details
@@ -480,9 +636,11 @@ class AddGoodDialog(ModernDialog):
         # Use editable tax rates
         cgst_rate = self.cgst_spin.value()
         sgst_rate = self.sgst_spin.value()
+        igst_rate = self.igst_spin.value()
         cgst_rs = (taxable_value * cgst_rate) / 100
         sgst_rs = (taxable_value * sgst_rate) / 100
-        total_amount = total + cgst_rs + sgst_rs
+        igst_rs = (taxable_value * igst_rate) / 100
+        total_amount = total + cgst_rs + sgst_rs + igst_rs
         
         # Update or add total display
         if self.details_layout.count() > 4:
@@ -502,7 +660,7 @@ class AddGoodDialog(ModernDialog):
         if result == DIALOG_ACCEPTED:
             # Refresh good combo (filtered by category)
             self.good_combo.clear()
-            self.good_combo.addItem("", None)
+            self.good_combo.addItem("--Select Good--", None)
             goods = self.db.get_goods(category=self.category) if self.category else self.db.get_goods()
             for good in goods:
                 self.good_combo.addItem(f"{good['description']} ({good['hsn_code']})", good)
@@ -521,9 +679,11 @@ class AddGoodDialog(ModernDialog):
         # Use editable tax rates
         cgst_rate = self.cgst_spin.value()
         sgst_rate = self.sgst_spin.value()
+        igst_rate = self.igst_spin.value()
         cgst_rs = (taxable_value * cgst_rate) / 100
         sgst_rs = (taxable_value * sgst_rate) / 100
-        total_amount = total + cgst_rs + sgst_rs
+        igst_rs = (taxable_value * igst_rate) / 100
+        total_amount = total + cgst_rs + sgst_rs + igst_rs
         
         self.item_data = {
             'description': good_data['description'],
@@ -537,8 +697,8 @@ class AddGoodDialog(ModernDialog):
             'cgst_rs': cgst_rs,
             'sgst_rate': sgst_rate,
             'sgst_rs': sgst_rs,
-            'igst_rate': 0,
-            'igst_rs': 0,
+            'igst_rate': igst_rate,
+            'igst_rs': igst_rs,
             'total_amount': total_amount
         }
         
@@ -552,47 +712,146 @@ class NewGoodDialog(ModernDialog):
         self.db = db
         self.category = category
         
+        # Uniform field width
+        field_width = 250
+        
         # Description
         desc_layout = QHBoxLayout()
-        desc_layout.addWidget(QLabel("Description *:"))
+        desc_label = QLabel("Description *:")
+        desc_label.setMinimumWidth(100)
+        desc_layout.addWidget(desc_label)
         self.desc_edit = QLineEdit()
+        self.desc_edit.setMinimumWidth(field_width)
+        self.desc_edit.setMaximumWidth(field_width)
         desc_layout.addWidget(self.desc_edit)
+        desc_layout.addStretch()
         self.layout.addLayout(desc_layout)
+        
+        # Category dropdown - same style as in configuration
+        category_layout = QHBoxLayout()
+        category_label = QLabel("Category *:")
+        category_label.setMinimumWidth(100)
+        category_layout.addWidget(category_label)
+        self.category_combo = NoWheelComboBox()
+        self.category_combo.addItem("-- Select Category --", None)  # Placeholder
+        self.category_combo.addItem("Detonator", "Detonator")
+        self.category_combo.addItem("Explosives", "Explosives")
+        self.category_combo.setMinimumWidth(field_width)
+        self.category_combo.setMaximumWidth(field_width)
+        self.category_combo.setEditable(False)
+        # Exact same styling as configuration category field
+        self.category_combo.setStyleSheet("""
+            QComboBox {
+                padding: 10px 12px;
+                border: 1.5px solid #d0d7de;
+                border-radius: 8px;
+                background-color: #ffffff;
+                font-size: 14px;
+                color: #212529;
+                text-align: center;
+            }
+            QComboBox:focus {
+                border: 1.5px solid #0d6efd;
+                background-color: #ffffff;
+            }
+            QComboBox::drop-down {
+                width: 0px;
+                border: none;
+                background: transparent;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                width: 0px;
+                height: 0px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        if category:
+            index = self.category_combo.findData(category)
+            if index >= 0:
+                self.category_combo.setCurrentIndex(index)
+        category_layout.addWidget(self.category_combo)
+        category_layout.addStretch()
+        self.layout.addLayout(category_layout)
         
         # HSN Code
         hsn_layout = QHBoxLayout()
-        hsn_layout.addWidget(QLabel("HSN Code *:"))
+        hsn_label = QLabel("HSN Code *:")
+        hsn_label.setMinimumWidth(100)
+        hsn_layout.addWidget(hsn_label)
         self.hsn_edit = QLineEdit()
+        self.hsn_edit.setMinimumWidth(field_width)
+        self.hsn_edit.setMaximumWidth(field_width)
         hsn_layout.addWidget(self.hsn_edit)
+        hsn_layout.addStretch()
         self.layout.addLayout(hsn_layout)
         
-        # Unit
-        unit_layout = QHBoxLayout()
-        unit_layout.addWidget(QLabel("Unit *:"))
-        self.unit_combo = QComboBox()
-        self.unit_combo.addItems(['NOS', 'KG'])
-        unit_layout.addWidget(self.unit_combo)
-        self.layout.addLayout(unit_layout)
-        
-        # Category (if provided)
-        if category:
-            category_layout = QHBoxLayout()
-            category_layout.addWidget(QLabel("Category:"))
-            category_label = QLabel(category)
-            category_label.setStyleSheet("font-weight: bold; color: #007bff;")
-            category_layout.addWidget(category_label)
-            category_layout.addStretch()
-            self.layout.addLayout(category_layout)
-        
-        # Rate
+        # Rate 
         rate_layout = QHBoxLayout()
-        rate_layout.addWidget(QLabel("Rate *:"))
+        rate_label = QLabel("Rate *:")
+        rate_label.setMinimumWidth(100)
+        rate_layout.addWidget(rate_label)
         self.rate_spin = QDoubleSpinBox()
         self.rate_spin.setMinimum(0.01)
         self.rate_spin.setMaximum(999999)
         self.rate_spin.setDecimals(2)
+        self.rate_spin.setMinimumWidth(field_width)
+        self.rate_spin.setMaximumWidth(field_width)
+        # Minimal styling to show arrows clearly
+        self.rate_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 8px 8px 8px 8px;
+                border: 2px solid #ced4da;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: white;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid #007bff;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                width: 20px;
+            }
+        """)
         rate_layout.addWidget(self.rate_spin)
+        rate_layout.addStretch()
         self.layout.addLayout(rate_layout)
+        
+        # Unit
+        unit_layout = QHBoxLayout()
+        unit_label = QLabel("Unit *:")
+        unit_label.setMinimumWidth(100)
+        unit_layout.addWidget(unit_label)
+        self.unit_combo = NoWheelComboBox()
+        self.unit_combo.addItems(['NOS', 'KG'])
+        self.unit_combo.setMinimumWidth(field_width)
+        self.unit_combo.setMaximumWidth(field_width)
+        # Simplified Unit Style
+        self.unit_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #ced4da;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QComboBox:focus {
+                border: 2px solid #007bff;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 20px; 
+                border-left: 1px solid #ced4da;
+                background-color: #f8f9fa;
+            }
+            /* DELETE the QComboBox::down-arrow block entirely */
+        """)
+        unit_layout.addWidget(self.unit_combo)
+        unit_layout.addStretch()
+        self.layout.addLayout(unit_layout)
         
         # Buttons
         btn_save = QPushButton("Save")
@@ -611,6 +870,7 @@ class NewGoodDialog(ModernDialog):
         hsn_code = self.hsn_edit.text().strip()
         unit = self.unit_combo.currentText()
         rate = self.rate_spin.value()
+        category = self.category_combo.currentData()
         
         if not description:
             QMessageBox.warning(self, "Error", "Description is required")
@@ -620,8 +880,12 @@ class NewGoodDialog(ModernDialog):
             QMessageBox.warning(self, "Error", "HSN Code is required")
             return
         
+        if not category:
+            QMessageBox.warning(self, "Error", "Please select a Category")
+            return
+        
         try:
-            self.db.add_good(description, hsn_code, unit, rate, self.category)
+            self.db.add_good(description, hsn_code, unit, rate, category)
             QMessageBox.information(self, "Success", "Good added successfully")
             self.accept()
         except Exception as e:
@@ -667,9 +931,9 @@ class LicenseActivationDialog(ModernDialog):
     def __init__(self, hardware_id, parent=None):
         super().__init__("Activate License", parent)
         self.hardware_id = hardware_id
-        self.setMinimumWidth(600)
-        self.setMinimumHeight(500)
-        self.resize(650, 550)
+        self.setMinimumWidth(750)
+        self.setMinimumHeight(550)
+        self.resize(800, 600)
         
         self.setup_ui()
         
@@ -711,19 +975,24 @@ class LicenseActivationDialog(ModernDialog):
         # License key input
         key_group = QGroupBox("Enter License Key")
         key_layout = QVBoxLayout()
+        key_layout.setContentsMargins(10, 10, 10, 10)
         self.license_key_edit = QLineEdit()
         self.license_key_edit.setPlaceholderText("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX")
+        self.license_key_edit.setMinimumHeight(50)
+        self.license_key_edit.setMaxLength(39)  # 32 chars + 7 dashes
         self.license_key_edit.setStyleSheet("""
             QLineEdit {
-                padding: 12px;
+                padding: 15px;
                 border: 2px solid #ced4da;
-                border-radius: 5px;
-                font-size: 14px;
-                font-family: monospace;
-                letter-spacing: 2px;
+                border-radius: 6px;
+                font-size: 15px;
+                font-family: 'Courier New', monospace;
+                letter-spacing: 1px;
+                background-color: white;
             }
             QLineEdit:focus {
-                border: 2px solid #007bff;
+                border: 3px solid #007bff;
+                background-color: #f8f9ff;
             }
         """)
         self.license_key_edit.textChanged.connect(self.format_license_key)
@@ -777,13 +1046,14 @@ class LicenseActivationDialog(ModernDialog):
         # Remove all non-alphanumeric characters
         clean = ''.join(c for c in text.upper() if c.isalnum())
         
+        # Limit to 32 characters (8 groups of 4)
+        if len(clean) > 32:
+            clean = clean[:32]
+        
         # Add dashes every 4 characters
         formatted = '-'.join([clean[i:i+4] for i in range(0, len(clean), 4)])
         
-        # Limit to 35 characters (8 groups of 4 + 7 dashes)
-        if len(formatted) > 35:
-            formatted = formatted[:35]
-        
+        # Result should be max 39 characters (32 chars + 7 dashes)
         if formatted != text:
             self.license_key_edit.blockSignals(True)
             self.license_key_edit.setText(formatted)

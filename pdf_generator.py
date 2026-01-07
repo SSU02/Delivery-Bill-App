@@ -28,6 +28,15 @@ class PDFGenerator:
         self.styles = getSampleStyleSheet()
         self.setup_custom_styles()
     
+    def format_number_cell(self, value, default_font_size=7):
+        """
+        Format a number for table cell. Returns string - font size will be handled via table styles.
+        We'll apply smaller font (5) to number columns when they contain large numbers.
+        """
+        if not value or value == '':
+            return ''
+        return str(value)
+    
     def setup_custom_styles(self):
         """Setup custom paragraph styles"""
         if 'ChallanTitle' not in self.styles.byName:
@@ -204,17 +213,17 @@ class PDFGenerator:
                     description,
                     str(item.get('hsn_code', '')),
                     item.get('unit', ''),
-                    f"{item.get('qty', 0):.2f}",
-                    f"{item.get('rate', 0):.2f}",
-                    f"{item.get('total', 0):.2f}",
-                    f"{item.get('taxable_value', 0):.2f}",
+                    self.format_number_cell(f"{item.get('qty', 0):.2f}"),
+                    self.format_number_cell(f"{item.get('rate', 0):.2f}"),
+                    self.format_number_cell(f"{item.get('total', 0):.2f}"),
+                    self.format_number_cell(f"{item.get('taxable_value', 0):.2f}"),
                     f"{cgst_rate_val:.2f}%" if cgst_rate_val > 0 else '',  # Add % sign
-                    f"{item.get('cgst_rs', 0):.2f}",
+                    self.format_number_cell(f"{item.get('cgst_rs', 0):.2f}"),
                     f"{sgst_rate_val:.2f}%" if sgst_rate_val > 0 else '',  # Add % sign
-                    f"{item.get('sgst_rs', 0):.2f}",
+                    self.format_number_cell(f"{item.get('sgst_rs', 0):.2f}"),
                     f"{igst_rate_val:.2f}%" if igst_rate_val > 0 else '',  # Add % sign
-                    f"{item.get('igst_rs', 0):.2f}" if item.get('igst_rs', 0) > 0 else '',
-                    f"{item.get('total_amount', 0):.2f}"
+                    self.format_number_cell(f"{item.get('igst_rs', 0):.2f}") if item.get('igst_rs', 0) > 0 else '',
+                    self.format_number_cell(f"{item.get('total_amount', 0):.2f}")
                 ])
             
             # Empty row before totals
@@ -226,15 +235,15 @@ class PDFGenerator:
             totals_row_idx = len(main_table_data)
             main_table_data.append([
                 '', '', '', '', '', '',  # Col 0-5: empty
-                f"{total_items_total:.2f}",  # Col 6: sum of 'Total' column (col 6 in data rows)
-                f"{total_taxable_value:.2f}",  # Col 7: sum of taxable_value (col 7 in data rows)
+                self.format_number_cell(f"{total_items_total:.2f}"),  # Col 6: sum of 'Total' column (col 6 in data rows)
+                self.format_number_cell(f"{total_taxable_value:.2f}"),  # Col 7: sum of taxable_value (col 7 in data rows)
                 '',  # Col 8: CGST rate (empty for totals, rates don't sum)
-                f"{total_cgst_rs:.2f}",  # Col 9: sum of cgst_rs (col 9 in data rows)
+                self.format_number_cell(f"{total_cgst_rs:.2f}"),  # Col 9: sum of cgst_rs (col 9 in data rows)
                 '',  # Col 10: SGST rate (empty for totals)
-                f"{total_sgst_rs:.2f}",  # Col 11: sum of sgst_rs (col 11 in data rows)
+                self.format_number_cell(f"{total_sgst_rs:.2f}"),  # Col 11: sum of sgst_rs (col 11 in data rows)
                 '',  # Col 12: IGST rate (empty for totals)
-                f"{total_igst_rs:.2f}" if total_igst_rs > 0 else '',  # Col 13: sum of igst_rs (col 13 in data rows)
-                f"{total_items_amount:.2f}"  # Col 14: sum of total_amount (col 14 in data rows)
+                self.format_number_cell(f"{total_igst_rs:.2f}") if total_igst_rs > 0 else '',  # Col 13: sum of igst_rs (col 13 in data rows)
+                self.format_number_cell(f"{total_items_amount:.2f}")  # Col 14: sum of total_amount (col 14 in data rows)
             ])
         
         # Totals section (below items table)
@@ -245,17 +254,17 @@ class PDFGenerator:
         
         # Row: Challan Total value in words (left) and Freight Charges (right)
         main_table_data.append([
-            'Challan Total value ( In Words) :', '', '', '', '', '', '', '', '', '', 'Freight Charges', '', '', '', f"{freight:.2f}"
+            'Challan Total value ( In Words) :', '', '', '', '', '', '', '', '', '', 'Freight Charges', '', '', '', self.format_number_cell(f"{freight:.2f}")
         ])
         
         # Row: Words text (left) and Rounded off (right)
         main_table_data.append([
-            words_text, '', '', '', '', '', '', '', '', '', 'Rounded off', '', '', '', f"{rounded_total:.2f}"
+            words_text, '', '', '', '', '', '', '', '', '', 'Rounded off', '', '', '', self.format_number_cell(f"{rounded_total:.2f}")
         ])
         
         # Row: Empty (left) and Total/Grand Total (right)
         main_table_data.append([
-            '', '', '', '', '', '', '', '', '', '', 'Total', '', '', '', f"{grand_total:.2f}"
+            '', '', '', '', '', '', '', '', '', '', 'Total', '', '', '', self.format_number_cell(f"{grand_total:.2f}")
         ])
         
         # Blaster details section (empty row above removed)
@@ -344,6 +353,8 @@ class PDFGenerator:
         # Build base style list
         style_list = [
             # Basic formatting for entire table
+            # Keep overall text at the original size (7) so only the goods/items
+            # table can be reduced separately without shrinking everything.
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 0), (-1, -1), 7),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -354,9 +365,9 @@ class PDFGenerator:
             # OUTER BOX - continuous border around ENTIRE table
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
             
-            # Title row (0) - DELIVERY CHALLAN (smaller font, reduced padding)
+            # Title row (0) - DELIVERY CHALLAN
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),  # Reduced from 14
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
             ('SPAN', (0, 0), (-1, 0)),
@@ -423,13 +434,13 @@ class PDFGenerator:
             ('BOTTOMPADDING', (13, 6), (13, 6), 2),
             ('TOPPADDING', (13, 6), (13, 6), 2),
             
-            # Receiver Details header (row 7) - BOLD and larger font
+            # Receiver Details header (row 7) - BOLD and slightly larger font
             ('SPAN', (0, 7), (-1, 7)),
-            ('FONTSIZE', (0, 7), (-1, 7), 10),  # Larger font size for header
-            ('FONTNAME', (0, 7), (-1, 7), 'Helvetica-Bold'),  # BOLD for header
+            ('FONTSIZE', (0, 7), (-1, 7), 10),
+            ('FONTNAME', (0, 7), (-1, 7), 'Helvetica-Bold'),
             
-            # Receiver Details data rows (8-13) - Normal font (not bold, normal size), reduced spacing
-            ('FONTSIZE', (0, 8), (-1, 13), 7),  # Normal font size (matches default)
+            # Receiver Details data rows (8-13) - back to normal size
+            ('FONTSIZE', (0, 8), (-1, 13), 7),
             ('FONTNAME', (0, 8), (-1, 13), 'Helvetica'),  # Normal font (NOT bold) - explicitly set
             ('ALIGN', (0, 8), (-1, 13), 'LEFT'),
             ('BOTTOMPADDING', (0, 8), (-1, 13), 1),  # Reduced spacing between fields
@@ -449,10 +460,15 @@ class PDFGenerator:
             ('FONTNAME', (10, totals_section_start), (10, totals_section_start), 'Helvetica-Bold'),
             ('FONTNAME', (10, totals_section_start+1), (10, totals_section_start+1), 'Helvetica-Bold'),
             ('FONTNAME', (10, totals_section_start+2), (10, totals_section_start+2), 'Helvetica-Bold'),
-            ('ALIGN', (15, totals_section_start), (15, totals_section_start+2), 'RIGHT'),  # Amounts right aligned
+            ('ALIGN', (14, totals_section_start), (14, totals_section_start+2), 'RIGHT'),  # Amounts right aligned (col 14, not 15)
             ('SPAN', (0, totals_section_start+1), (9, totals_section_start+1)),  # Words span multiple columns
             ('TOPPADDING', (0, totals_section_start), (-1, totals_section_start+2), 1),  # Reduced top padding
             ('BOTTOMPADDING', (0, totals_section_start), (-1, totals_section_start+2), 1),  # Reduced bottom padding
+            # Apply font size 7 to number column (14) in totals section for better readability
+            ('FONTSIZE', (14, totals_section_start), (14, totals_section_start+2), 7),  # Font size 7 for totals section
+            # Increase horizontal padding for number column (14) in totals section for better spacing
+            ('LEFTPADDING', (14, totals_section_start), (14, totals_section_start+2), 3),  # Increased padding
+            ('RIGHTPADDING', (14, totals_section_start), (14, totals_section_start+2), 3),  # Increased padding
             
             # Blaster section (rows blaster_start to blaster_start+2) - reduced spacing
             ('FONTNAME', (0, blaster_start), (0, blaster_start+2), 'Helvetica'),
@@ -478,32 +494,56 @@ class PDFGenerator:
             # Items table headers (rows items_header1, items_header2)
             style_list.extend([
                 ('FONTNAME', (0, items_header1), (-1, items_header2), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, items_header1), (-1, items_header1), 7),
-                ('FONTSIZE', (0, items_header2), (-1, items_header2), 6),
+                ('FONTSIZE', (0, items_header1), (-1, items_header1), 7),  # Restored to 7
+                ('FONTSIZE', (0, items_header2), (-1, items_header2), 6),  # Restored to 6
                 ('ALIGN', (0, items_header1), (-1, items_header2), 'CENTER'),
                 ('VALIGN', (0, items_header1), (-1, items_header2), 'MIDDLE'),
-                # Merge CGST, SGST, IGST headers in row 1
+                
+                # Merge cells vertically (span 2 rows) for S.No through Taxable Value (columns 0-7)
+                ('SPAN', (0, items_header1), (0, items_header2)),  # S.No
+                ('SPAN', (1, items_header1), (1, items_header2)),  # Description of Goods
+                ('SPAN', (2, items_header1), (2, items_header2)),  # HSN Code
+                ('SPAN', (3, items_header1), (3, items_header2)),  # Unit
+                ('SPAN', (4, items_header1), (4, items_header2)),  # Qty
+                ('SPAN', (5, items_header1), (5, items_header2)),  # Rate
+                ('SPAN', (6, items_header1), (6, items_header2)),  # Total
+                ('SPAN', (7, items_header1), (7, items_header2)),  # Taxable Value
+                
+                # Merge CGST, SGST, IGST headers horizontally in row 1 (keep as is)
                 # Row 1: CGST(8), ''(9), SGST(10), ''(11), IGST(12), ''(13), TOTAL(14)
                 # Row 2: Rate(8), Rs.(9), Rate(10), Rs.(11), Rate(12), Rs.(13), Amount(14)
-                # Span each header over its two subcolumns (CGST, SGST, IGST span 2 columns each, TOTAL is single column)
+                # Span each header over its two subcolumns (CGST, SGST, IGST span 2 columns each)
                 ('SPAN', (8, items_header1), (9, items_header1)),  # CGST spans 8-9 (2 columns for Rate and Rs)
                 ('SPAN', (10, items_header1), (11, items_header1)),  # SGST spans 10-11 (2 columns for Rate and Rs)
                 ('SPAN', (12, items_header1), (13, items_header1)),  # IGST spans 12-13 (2 columns for Rate and Rs)
-                # TOTAL does not span - it's only at column 14
+                
+                # Merge TOTAL vertically (span 2 rows) for column 14
+                ('SPAN', (14, items_header1), (14, items_header2)),  # TOTAL/Amount
+                
                 # Grid borders for header rows
                 ('GRID', (0, items_header1), (-1, items_header2), 0.5, colors.black),
                 
                 # Items data rows - center aligned, full grid
                 ('ALIGN', (0, items_data_start), (-1, items_data_end), 'CENTER'),
                 ('VALIGN', (0, items_data_start), (-1, items_data_end), 'MIDDLE'),
-                ('FONTSIZE', (0, items_data_start), (-1, items_data_end), 7),
+                ('FONTSIZE', (0, items_data_start), (-1, items_data_end), 7),  # Default font size
+                # Apply font size 6 to number columns (4-14) to fit large numbers
+                ('FONTSIZE', (4, items_data_start), (14, items_data_end), 6),  # Smaller font for number columns
                 ('GRID', (0, items_data_start), (-1, items_data_end), 0.5, colors.black),
+                # Reduce horizontal padding for number columns (4-14) to fit large numbers
+                ('LEFTPADDING', (4, items_data_start), (14, items_data_end), 0.5),  # Reduced padding
+                ('RIGHTPADDING', (4, items_data_start), (14, items_data_end), 0.5),  # Reduced padding
                 
                 # Items totals row
                 ('FONTNAME', (0, items_totals_row), (-1, items_totals_row), 'Helvetica-Bold'),
                 ('ALIGN', (0, items_totals_row), (-1, items_totals_row), 'CENTER'),
                 ('LINEABOVE', (0, items_totals_row), (-1, items_totals_row), 1, colors.black),
                 ('GRID', (0, items_totals_row), (-1, items_totals_row), 0.5, colors.black),
+                # Apply font size 6 to number columns in totals row
+                ('FONTSIZE', (6, items_totals_row), (14, items_totals_row), 6),  # Smaller font for number columns
+                # Reduce horizontal padding for number columns in totals row
+                ('LEFTPADDING', (6, items_totals_row), (14, items_totals_row), 0.5),  # Reduced padding
+                ('RIGHTPADDING', (6, items_totals_row), (14, items_totals_row), 0.5),  # Reduced padding
             ])
         
         main_table.setStyle(TableStyle(style_list))

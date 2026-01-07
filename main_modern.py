@@ -6,15 +6,16 @@ import sys
 # Try PyQt5 first (more stable on macOS), fallback to PyQt6
 try:
     from PyQt5.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-        QLabel, QPushButton, QLineEdit, QComboBox, QCheckBox, QDateEdit,
-        QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea,
-        QFrame, QGroupBox, QMessageBox, QDialog, QTextEdit, QSpinBox,
-        QDoubleSpinBox, QFileDialog, QSplitter, QListWidget, QListWidgetItem,
-        QAbstractItemView, QStackedWidget
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QLineEdit, QComboBox, QCheckBox, QDateEdit,
+    QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea,
+    QFrame, QGroupBox, QMessageBox, QDialog, QTextEdit, QSpinBox,
+    QDoubleSpinBox, QFileDialog, QSplitter, QListWidget, QListWidgetItem,
+    QListView, QInputDialog, QAbstractItemView, QStackedWidget, QStyledItemDelegate,
+    QGraphicsDropShadowEffect
     )
-    from PyQt5.QtCore import Qt, QDate, QSize, pyqtSignal
-    from PyQt5.QtGui import QFont, QIcon, QColor, QPalette
+    from PyQt5.QtCore import Qt, QDate, QSize, pyqtSignal, QEvent
+    from PyQt5.QtGui import QFont, QIcon, QColor, QPalette, QPixmap, QPainter, QPen, QPainterPath, QWheelEvent
     PYQT_VERSION = 5
     DIALOG_ACCEPTED = QDialog.Accepted
 except ImportError:
@@ -25,10 +26,11 @@ except ImportError:
         QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea,
         QFrame, QGroupBox, QMessageBox, QDialog, QTextEdit, QSpinBox,
         QDoubleSpinBox, QFileDialog, QSplitter, QListWidget, QListWidgetItem,
-        QAbstractItemView, QStackedWidget
+    QListView, QInputDialog, QAbstractItemView, QStackedWidget, QStyledItemDelegate,
+    QGraphicsDropShadowEffect
     )
-    from PyQt6.QtCore import Qt, QDate, QSize, pyqtSignal
-    from PyQt6.QtGui import QFont, QIcon, QColor, QPalette
+    from PyQt6.QtCore import Qt, QDate, QSize, pyqtSignal, QEvent
+    from PyQt6.QtGui import QFont, QIcon, QColor, QPalette, QPixmap, QPainter, QPen, QPainterPath, QWheelEvent
     PYQT_VERSION = 6
     DIALOG_ACCEPTED = QDialog.DialogCode.Accepted
 from datetime import datetime
@@ -37,11 +39,24 @@ from pdf_generator import PDFGenerator
 from number_to_words import number_to_words
 from dialogs_modern import (
     AddAreaDialog, AddVehicleDialog, AddCustomerDialog,
-    AddGoodDialog, AddBlasterDialog, NewGoodDialog, SelectCustomerDialog,
-    LicenseActivationDialog
+    AddGoodDialog, AddBlasterDialog, NewGoodDialog, SelectCustomerDialog
 )
+from modern_calendar import DateEditWithModernCalendar
 import re
 import math
+import tempfile
+import os
+
+
+class NoWheelComboBox(QComboBox):
+    """QComboBox that only responds to wheel events when focused/clicked"""
+    def wheelEvent(self, event: QWheelEvent):
+        # Only process wheel events if the combo box is focused
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            # Ignore wheel events when not focused
+            event.ignore()
 
 
 class ModernButton(QPushButton):
@@ -149,7 +164,7 @@ class SidebarWidget(QWidget):
         self.layout.setSpacing(0)
         
         # Logo/Title
-        title = QLabel("Delivery Bill\nGenerator")
+        title = QLabel("Senthil Explosives\nDelivery Bill Generator")
         title.setStyleSheet("""
             QLabel {
                 font-size: 18px;
@@ -185,22 +200,23 @@ class CustomerItemWidget(QWidget):
     """Widget for customer list item"""
     clicked = pyqtSignal(int)
     
-    def __init__(self, customer_id, customer_name, is_selected=False, *args, **kwargs):
+    def __init__(self, customer_id, customer_name, checkmark_icon_path, is_selected=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.customer_id = customer_id
+        self.checkmark_icon_path = checkmark_icon_path
         self.setStyleSheet("""
             QWidget {
                 background-color: white;
                 border: 1px solid #dee2e6;
                 border-radius: 5px;
-                padding: 10px;
+                padding: 8px;
             }
             QWidget:hover {
                 background-color: #f8f9fa;
                 border: 1px solid #007bff;
             }
             QCheckBox {
-                font-size: 13px;
+                font-size: 11px;
                 color: #212529;
                 background-color: transparent;
             }
@@ -208,15 +224,19 @@ class CustomerItemWidget(QWidget):
                 width: 18px;
                 height: 18px;
                 border: 2px solid #ced4da;
-                border-radius: 3px;
+                border-radius: 4px;
                 background-color: white;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #007bff;
             }
             QCheckBox::indicator:checked {
                 background-color: #007bff;
                 border-color: #007bff;
+                image: url(""" + self.checkmark_icon_path.replace('\\', '/') + """);
             }
             QLabel {
-                font-size: 13px;
+                font-size: 11px;
                 color: #212529;
                 background-color: transparent;
             }
@@ -228,15 +248,15 @@ class CustomerItemWidget(QWidget):
         """)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 12, 15, 12)  # Increased margins for broader appearance
-        layout.setSpacing(12)  # Increased spacing between elements
+        layout.setContentsMargins(12, 8, 12, 8)  # Reduced margins for more compact appearance
+        layout.setSpacing(5)  # Reduced spacing to join checkbox and name together
         
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(is_selected)
         layout.addWidget(self.checkbox)
         
-        self.name_label = QLabel(customer_name)
-        self.name_label.setStyleSheet("font-weight: bold; font-size: 14px;")  # Slightly larger font
+        self.name_label = QLabel(customer_name.upper() if customer_name else customer_name)
+        self.name_label.setStyleSheet("font-weight: bold; font-size: 12px;")  # Reduced font size
         layout.addWidget(self.name_label, 1)
         
         self.expand_btn = QPushButton("▶")
@@ -254,6 +274,16 @@ class CustomerItemWidget(QWidget):
         # Make entire widget clickable
         self.setCursor(Qt.CursorShape.PointingHandCursor)
     
+    def mousePressEvent(self, event):
+        """Emit clicked signal when the row (name/area) is clicked, but not when clicking the checkbox."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            # If click is on the checkbox, let default behavior happen
+            if not self.checkbox.geometry().contains(event.pos()):
+                # Simulate clicking the expand button (toggle details)
+                self.expand_btn.click()
+                return
+        super().mousePressEvent(event)
+    
     def set_expanded(self, expanded):
         self.expand_btn.setText("▼" if expanded else "▶")
 
@@ -264,6 +294,9 @@ class BatchProcessingWindow(QMainWindow):
         super().__init__()
         self.db = Database()
         self.pdf_gen = PDFGenerator()
+        
+        # Create checkmark icon for checkboxes
+        self.checkmark_icon_path = self._create_checkmark_icon()
         
         # State
         self.current_category = None
@@ -282,9 +315,42 @@ class BatchProcessingWindow(QMainWindow):
         self.default_cgst_rate = float(self.db.get_setting('cgst_rate', '9.0'))
         self.default_sgst_rate = float(self.db.get_setting('sgst_rate', '9.0'))
     
+    def _create_checkmark_icon(self):
+        """Create a white checkmark icon for checkboxes"""
+        # Create a pixmap for the checkmark
+        pixmap = QPixmap(20, 20)
+        pixmap.fill(Qt.GlobalColor.transparent if PYQT_VERSION == 6 else Qt.transparent)
+        
+        # Draw checkmark
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing if PYQT_VERSION == 6 else QPainter.Antialiasing)
+        
+        # Set pen for checkmark
+        pen = QPen(QColor(255, 255, 255))  # White color
+        pen.setWidth(2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap if PYQT_VERSION == 6 else Qt.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin if PYQT_VERSION == 6 else Qt.RoundJoin)
+        painter.setPen(pen)
+        
+        # Draw checkmark path
+        path = QPainterPath()
+        path.moveTo(4, 10)
+        path.lineTo(8, 14)
+        path.lineTo(16, 6)
+        painter.drawPath(path)
+        
+        painter.end()
+        
+        # Save to temporary file
+        temp_dir = tempfile.gettempdir()
+        icon_path = os.path.join(temp_dir, 'checkbox_check.png')
+        pixmap.save(icon_path)
+        
+        return icon_path
+    
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("Delivery Bill Generator - Professional Edition")
+        self.setWindowTitle("Senthil Explosives Delivery Bill Generator")
         self.setGeometry(100, 100, 1600, 900)
         
         # Force light theme and set application style
@@ -397,15 +463,19 @@ class BatchProcessingWindow(QMainWindow):
                 background-color: transparent;
             }
             QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
+                width: 20px;
+                height: 20px;
                 border: 2px solid #ced4da;
-                border-radius: 3px;
+                border-radius: 4px;
                 background-color: white;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #007bff;
             }
             QCheckBox::indicator:checked {
                 background-color: #007bff;
                 border-color: #007bff;
+                image: url(""" + self.checkmark_icon_path.replace('\\', '/') + """);
             }
         """)
         
@@ -429,107 +499,127 @@ class BatchProcessingWindow(QMainWindow):
         left_config_widget = QWidget()
         left_config_layout = QVBoxLayout(left_config_widget)
         left_config_layout.setContentsMargins(10, 5, 10, 12)  # Top margin 5px, bottom margin 12px
-        left_config_layout.setSpacing(20)  # More space between rows
+        left_config_layout.setSpacing(10)  # Reduced spacing between rows
         
-        # Row 1: Category and Area - CLEAR AND VISIBLE
+        # Row 1: Category, Area, Vehicle, and Date - All on same line
         row1_layout = QHBoxLayout()
-        row1_layout.setSpacing(20)
+        row1_layout.setSpacing(15)
         row1_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Category - Larger and clearer
+        # Define dropdown style for all dropdowns
+        self.dropdown_field_style = """
+            QComboBox {
+                padding: 10px 12px;
+                border: 1.5px solid #d0d7de;
+                border-radius: 8px;
+                background-color: #ffffff;
+                font-size: 14px;
+                color: #212529;
+                text-align: center;
+            }
+            QComboBox:focus {
+                border: 1.5px solid #0d6efd;
+                background-color: #ffffff;
+            }
+            QComboBox::drop-down {
+                width: 0px;
+                border: none;
+                background: transparent;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                width: 0px;
+                height: 0px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: transparent;
+                border: none;
+            }
+        """
+        
+        # Category - Dropdown field
         category_label = QLabel("Category:")
         category_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 80px; padding: 2px 0px;")
         category_label.setMinimumHeight(45)
         category_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.category_detonator = QCheckBox("Detonator")
-        self.category_explosives = QCheckBox("Explosives")
-        self.category_detonator.setStyleSheet("font-size: 14px; padding: 5px;")
-        self.category_explosives.setStyleSheet("font-size: 14px; padding: 5px;")
-        self.category_detonator.setMinimumHeight(45)
-        self.category_explosives.setMinimumHeight(45)
-        self.category_detonator.toggled.connect(self.on_category_changed)
-        self.category_explosives.toggled.connect(self.on_category_changed)
-        row1_layout.addWidget(category_label)
-        row1_layout.addWidget(self.category_detonator)
-        row1_layout.addWidget(self.category_explosives)
         
-        # Fixed spacing to align Area with Vehicle - Date section takes same space as Category section
-        # Category: 80px (label) + checkboxes (~200px) = ~280px
-        # Date: 60px (label) + 200px (field) = ~260px
-        # So we need ~20px more spacing before Area to match Date position
-        row1_layout.addSpacing(40)  # Fixed spacing to align with Date position
+        self.category_combo = NoWheelComboBox()
+        self.category_combo.setMinimumWidth(180)
+        self.category_combo.setMaximumWidth(180)
+        self.category_combo.setMinimumHeight(45)
+        self.category_combo.setEditable(False)
+        self.category_combo.addItem("-- Select Category --", None)
+        self.category_combo.addItem("Detonator", "Detonator")
+        self.category_combo.addItem("Explosives", "Explosives")
+        self.category_combo.setStyleSheet(self.dropdown_field_style)
+        # Simple dropdown without custom popup (only 2 options)
+        self.category_combo.setMaxVisibleItems(10)
+        self.category_combo.currentIndexChanged.connect(self.on_category_changed)
+        
+        row1_layout.addWidget(category_label)
+        row1_layout.addWidget(self.category_combo)
         
         # Area - Larger and clearer
         area_label = QLabel("Area:")
-        area_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 60px; padding: 2px 0px;")
+        area_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 50px; padding: 2px 0px;")
         area_label.setMinimumHeight(45)
         area_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.area_combo = QComboBox()
-        self.area_combo.setMinimumWidth(250)
+        self.area_combo = NoWheelComboBox()
+        self.area_combo.setMinimumWidth(180)
+        self.area_combo.setMaximumWidth(180)
         self.area_combo.setMinimumHeight(45)
         self.area_combo.setEditable(False)
-        self.area_combo.setStyleSheet("""
-            QComboBox {
-                padding: 10px;
-                border: 2px solid #ced4da;
-                border-radius: 5px;
-                background-color: white;
-                font-size: 14px;
-                color: #212529;
-            }
-            QComboBox:focus {
-                border: 2px solid #007bff;
-                background-color: white;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 35px;
-                background-color: transparent;
-            }
-            QComboBox::drop-down:hover {
-                background-color: transparent;
-            }
-            QComboBox QAbstractItemView {
-                border: 2px solid #ced4da;
-                selection-background-color: #007bff;
-                font-size: 14px;
-            }
-        """)
+        self.area_combo.setStyleSheet(self.dropdown_field_style)
+        # Disable default popup, use custom one
+        self.area_combo.setMaxVisibleItems(0)
+        self.area_combo.view().setVisible(False)
+        # Create custom popup with fixed buttons
+        self._create_custom_dropdown_popup(self.area_combo, self.add_area, self.manage_areas)
+        # Override showPopup to use custom popup
+        self.area_combo.showPopup = lambda: self._check_category_and_show_popup(self.area_combo, "Area")
+        # Add keyboard support to combo box
+        self._add_combo_keyboard_support(self.area_combo)
         self.area_combo.currentTextChanged.connect(self.on_area_changed)
-        area_btn_add = ModernButton("+ Add", primary=False)
-        area_btn_add.setMinimumHeight(45)
-        area_btn_add.setMinimumWidth(90)
-        area_btn_manage = ModernButton("Manage", primary=False)
-        area_btn_manage.setMinimumHeight(45)
-        area_btn_manage.setMinimumWidth(100)
-        area_btn_add.clicked.connect(self.add_area)
-        area_btn_manage.clicked.connect(self.manage_areas)
         row1_layout.addWidget(area_label)
         row1_layout.addWidget(self.area_combo)
-        row1_layout.addWidget(area_btn_add)
-        row1_layout.addWidget(area_btn_manage)
         
-        row1_layout.addStretch()
-        left_config_layout.addLayout(row1_layout)
+        # Vehicle - on same line
+        vehicle_label = QLabel("Vehicle:")
+        vehicle_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 60px; padding: 2px 0px;")
+        vehicle_label.setMinimumHeight(45)
+        vehicle_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.vehicle_combo = NoWheelComboBox()
+        self.vehicle_combo.setMinimumWidth(180)  # Same width as other fields
+        self.vehicle_combo.setMaximumWidth(180)  # Constrain to prevent expansion
+        self.vehicle_combo.setMinimumHeight(45)
+        self.vehicle_combo.setEditable(False)
+        self.vehicle_combo.setStyleSheet(self.dropdown_field_style)
+        # Disable default popup, use custom one  
+        self.vehicle_combo.setMaxVisibleItems(0)
+        self.vehicle_combo.view().setVisible(False)
+        # Create custom popup with fixed buttons
+        self._create_custom_dropdown_popup(self.vehicle_combo, self.add_vehicle, self.manage_vehicles)
+        # Override showPopup to use custom popup
+        self.vehicle_combo.showPopup = lambda: self._check_category_and_show_popup(self.vehicle_combo, "Vehicle")
+        # Add keyboard support to combo box
+        self._add_combo_keyboard_support(self.vehicle_combo)
+        row1_layout.addWidget(vehicle_label)
+        row1_layout.addWidget(self.vehicle_combo)
         
-        # Row 2: Date and Vehicle - Vehicle aligned with Area column
-        row2_layout = QHBoxLayout()
-        row2_layout.setSpacing(20)
-        row2_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Date - Large and visible
+        # Date - on same line
         date_label = QLabel("Date:")
-        date_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 60px; padding: 2px 0px;")
+        date_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 50px; padding: 2px 0px;")
         date_label.setMinimumHeight(45)
         date_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
         self.date_edit = QDateEdit()
         self.date_edit.setDate(QDate.currentDate())
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setMinimumWidth(200)
+        self.date_edit.setMinimumWidth(150)
         self.date_edit.setMinimumHeight(45)
         self.date_edit.setStyleSheet("""
             QDateEdit {
                 padding: 10px;
+                padding-right: 50px;
                 border: 2px solid #ced4da;
                 border-radius: 5px;
                 background-color: white;
@@ -541,35 +631,211 @@ class BatchProcessingWindow(QMainWindow):
                 background-color: white;
             }
             QDateEdit::drop-down {
-                border: none;
-                width: 35px;
-                background-color: transparent;
+                border-left: 2px solid #ced4da;
+                width: 45px;
+                background-color: #f8f9fa;
+                border-top-right-radius: 5px;
+                border-bottom-right-radius: 5px;
             }
             QDateEdit::drop-down:hover {
-                background-color: transparent;
+                background-color: #e9ecef;
+                border-left: 2px solid #007bff;
+            }
+            QDateEdit::drop-down:pressed {
+                background-color: #dee2e6;
+            }
+            QDateEdit::up-button, QDateEdit::down-button {
+                width: 0px;
+                height: 0px;
+                border: none;
+                background: transparent;
             }
         """)
+        
         if PYQT_VERSION == 6:
             self.date_edit.setDisplayFormat("dd-MM-yyyy")
         else:
             self.date_edit.setDisplayFormat("dd/MM/yyyy")
-        row2_layout.addWidget(date_label)
-        row2_layout.addWidget(self.date_edit)
         
-        # Same fixed spacing as Row 1 to align Vehicle with Area
-        row2_layout.addSpacing(40)  # Same spacing as Row 1
+        # Attach modern calendar popup
+        DateEditWithModernCalendar.attach_to_date_edit(self.date_edit)
         
-        # Vehicle - Large and visible, aligned with Area
-        vehicle_label = QLabel("Vehicle:")
-        vehicle_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 60px; padding: 2px 0px;")
-        vehicle_label.setMinimumHeight(45)
-        vehicle_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.vehicle_combo = QComboBox()
-        self.vehicle_combo.setMinimumWidth(250)  # Same width as area_combo
-        self.vehicle_combo.setMinimumHeight(45)
-        self.vehicle_combo.setEditable(False)
-        self.vehicle_combo.setStyleSheet("""
-            QComboBox {
+        # Create a wrapper to overlay the calendar icon
+        date_wrapper = QWidget()
+        date_wrapper.setMinimumWidth(150)
+        date_wrapper.setMinimumHeight(45)
+        date_wrapper_layout = QHBoxLayout(date_wrapper)
+        date_wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        date_wrapper_layout.setSpacing(0)
+        date_wrapper_layout.addWidget(self.date_edit)
+        
+        # Calendar icon label positioned absolutely over the dropdown area
+        if PYQT_VERSION == 5:
+            from PyQt5.QtGui import QPixmap
+        else:
+            from PyQt6.QtGui import QPixmap
+        
+        import os
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        calendar_icon_path = os.path.join(script_dir, "calendar_4371058.png")
+        
+        # Load the calendar icon image
+        calendar_pixmap = QPixmap(calendar_icon_path)
+        emoji_size = 18  # Small size like emoji
+        
+        if not calendar_pixmap.isNull():
+            # Get device pixel ratio for high-DPI displays (Retina, etc.)
+            app = QApplication.instance()
+            if app:
+                try:
+                    device_pixel_ratio = app.devicePixelRatio()
+                except:
+                    device_pixel_ratio = 2.0  # Default to 2x for Retina displays
+            else:
+                device_pixel_ratio = 2.0  # Default to 2x for better quality
+            
+            # Scale to higher resolution for crisp rendering
+            target_size = int(emoji_size * max(device_pixel_ratio, 2.0))
+            calendar_pixmap = calendar_pixmap.scaled(
+                target_size, target_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            
+            # Set device pixel ratio
+            if hasattr(calendar_pixmap, 'setDevicePixelRatio'):
+                calendar_pixmap.setDevicePixelRatio(max(device_pixel_ratio, 2.0))
+        
+        calendar_icon_label = QLabel(date_wrapper)
+        calendar_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        calendar_icon_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+            }
+        """)
+        calendar_icon_label.setScaledContents(False)
+        
+        if not calendar_pixmap.isNull():
+            calendar_icon_label.setPixmap(calendar_pixmap)
+        else:
+            # Fallback: use a simple text if image fails to load
+            calendar_icon_label.setText("📅")
+            calendar_icon_label.setStyleSheet("""
+                QLabel {
+                    background-color: transparent;
+                    border: none;
+                    padding: 0px;
+                    font-size: 14px;
+                }
+            """)
+        calendar_icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        calendar_icon_label.raise_()
+        
+        def update_icon_position():
+            if date_wrapper.width() > 0 and not calendar_pixmap.isNull():
+                # Get actual pixmap size
+                pixmap_width = calendar_pixmap.width()
+                pixmap_height = calendar_pixmap.height()
+                
+                # Center the icon in the dropdown area (right 45px)
+                icon_x = date_wrapper.width() - 45 + (45 - pixmap_width) // 2
+                icon_y = (date_wrapper.height() - pixmap_height) // 2
+                calendar_icon_label.setGeometry(icon_x, icon_y, pixmap_width, pixmap_height)
+        
+        # Store original methods
+        original_show = date_wrapper.showEvent
+        original_resize = date_wrapper.resizeEvent
+        
+        def show_with_icon(event):
+            if original_show:
+                original_show(event)
+            update_icon_position()
+        
+        def resize_with_icon(event):
+            if original_resize:
+                original_resize(event)
+            update_icon_position()
+        
+        date_wrapper.showEvent = show_with_icon
+        date_wrapper.resizeEvent = resize_with_icon
+        
+        row1_layout.addWidget(date_label)
+        row1_layout.addWidget(date_wrapper)
+        
+        row1_layout.addStretch()
+        left_config_layout.addLayout(row1_layout)
+        left_config_layout.addSpacing(15)  # Add spacing between rows
+        
+        # Row 2: Copy Type and E-Way Bill Number
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(10)
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Copy Type checkboxes on row 2
+        checkbox_label = QLabel("Copy Type:")
+        checkbox_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 80px; padding: 2px 0px;")
+        checkbox_label.setMinimumHeight(45)
+        checkbox_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        checkbox_style = """
+            QCheckBox {
+                font-size: 14px;
+                padding: 5px;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 22px;
+                height: 22px;
+                border: 2px solid #ced4da;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #007bff;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #007bff;
+                border-color: #007bff;
+                image: url(""" + self.checkmark_icon_path.replace('\\', '/') + """);
+            }
+        """
+        
+        self.original_checkbox = QCheckBox("Original")
+        self.duplicate_checkbox = QCheckBox("Duplicate")
+        self.triplicate_checkbox = QCheckBox("Triplicate")
+        self.original_checkbox.setStyleSheet(checkbox_style)
+        self.duplicate_checkbox.setStyleSheet(checkbox_style)
+        self.triplicate_checkbox.setStyleSheet(checkbox_style)
+        self.original_checkbox.setMinimumHeight(45)
+        self.duplicate_checkbox.setMinimumHeight(45)
+        self.triplicate_checkbox.setMinimumHeight(45)
+        # Default to Original checked
+        self.original_checkbox.setChecked(True)
+        
+        row2_layout.addWidget(checkbox_label)
+        row2_layout.addWidget(self.original_checkbox)
+        row2_layout.addSpacing(5)
+        row2_layout.addWidget(self.duplicate_checkbox)
+        row2_layout.addSpacing(5)
+        row2_layout.addWidget(self.triplicate_checkbox)
+        row2_layout.addSpacing(30)  # Space before E-Way Bill field
+        
+        # E-Way Bill Number on same row
+        eway_label = QLabel("E-Way Bill No:")
+        eway_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 100px; padding: 2px 0px;")
+        eway_label.setMinimumHeight(45)
+        eway_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        self.eway_bill_edit = QLineEdit()
+        self.eway_bill_edit.setPlaceholderText("Enter E-Way Bill Number")
+        self.eway_bill_edit.setMinimumWidth(250)  # Increased width
+        self.eway_bill_edit.setMaximumWidth(250)  # Constrain to prevent expansion
+        self.eway_bill_edit.setMinimumHeight(45)
+        self.eway_bill_edit.setStyleSheet("""
+            QLineEdit {
                 padding: 10px;
                 border: 2px solid #ced4da;
                 border-radius: 5px;
@@ -577,89 +843,37 @@ class BatchProcessingWindow(QMainWindow):
                 font-size: 14px;
                 color: #212529;
             }
-            QComboBox:focus {
+            QLineEdit:focus {
                 border: 2px solid #007bff;
                 background-color: white;
             }
-            QComboBox::drop-down {
-                border: none;
-                width: 35px;
-                background-color: transparent;
-            }
-            QComboBox::drop-down:hover {
-                background-color: transparent;
-            }
-            QComboBox QAbstractItemView {
-                border: 2px solid #ced4da;
-                selection-background-color: #007bff;
-                font-size: 14px;
-            }
         """)
-        vehicle_btn_add = ModernButton("+ Add", primary=False)
-        vehicle_btn_add.setMinimumHeight(45)
-        vehicle_btn_add.setMinimumWidth(90)  # Same width as area_btn_add
-        vehicle_btn_manage = ModernButton("Manage", primary=False)
-        vehicle_btn_manage.setMinimumHeight(45)
-        vehicle_btn_manage.setMinimumWidth(100)  # Same width as area_btn_manage
-        vehicle_btn_add.clicked.connect(self.add_vehicle)
-        vehicle_btn_manage.clicked.connect(self.manage_vehicles)
-        row2_layout.addWidget(vehicle_label)
-        row2_layout.addWidget(self.vehicle_combo)
-        row2_layout.addWidget(vehicle_btn_add)
-        row2_layout.addWidget(vehicle_btn_manage)
         
+        row2_layout.addWidget(eway_label)
+        row2_layout.addWidget(self.eway_bill_edit)
         row2_layout.addStretch()
         left_config_layout.addLayout(row2_layout)
-        
-        # Row 3: Original/Duplicate/Triplicate checkboxes
-        row3_layout = QHBoxLayout()
-        row3_layout.setSpacing(20)
-        row3_layout.setContentsMargins(0, 0, 0, 0)
-        
-        checkbox_label = QLabel("Copy Type:")
-        checkbox_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 80px; padding: 2px 0px;")
-        checkbox_label.setMinimumHeight(45)
-        checkbox_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        
-        self.original_checkbox = QCheckBox("Original")
-        self.duplicate_checkbox = QCheckBox("Duplicate")
-        self.triplicate_checkbox = QCheckBox("Triplicate")
-        self.original_checkbox.setStyleSheet("font-size: 14px; padding: 5px;")
-        self.duplicate_checkbox.setStyleSheet("font-size: 14px; padding: 5px;")
-        self.triplicate_checkbox.setStyleSheet("font-size: 14px; padding: 5px;")
-        self.original_checkbox.setMinimumHeight(45)
-        self.duplicate_checkbox.setMinimumHeight(45)
-        self.triplicate_checkbox.setMinimumHeight(45)
-        # Default to Original checked
-        self.original_checkbox.setChecked(True)
-        
-        row3_layout.addWidget(checkbox_label)
-        row3_layout.addWidget(self.original_checkbox)
-        row3_layout.addWidget(self.duplicate_checkbox)
-        row3_layout.addWidget(self.triplicate_checkbox)
-        row3_layout.addStretch()
-        left_config_layout.addLayout(row3_layout)
+        left_config_layout.addSpacing(5)  # Add spacing below copy type row
         
         config_splitter.addWidget(left_config_widget)
         config_splitter.setStretchFactor(0, 3)
         
-        # Right side: Goods Management partition
+        # Right side: Manage Goods button
         right_goods_widget = QWidget()
         right_goods_layout = QVBoxLayout(right_goods_widget)
-        right_goods_layout.setContentsMargins(15, 10, 15, 10)  # Reduced padding
-        right_goods_layout.setSpacing(15)  # Slightly increased spacing
+        right_goods_layout.setContentsMargins(15, 10, 15, 10)
+        right_goods_layout.setSpacing(15)
         
-        goods_label = QLabel("Goods Management")
-        goods_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #212529; padding: 8px 0px; min-height: 30px;")
-        goods_label.setMinimumHeight(30)  # Ensure enough height for text
-        right_goods_layout.addWidget(goods_label)
+        # Add stretch before button to center it vertically
+        right_goods_layout.addStretch()
         
         btn_manage_goods = ModernButton("Manage Goods", primary=True)
-        btn_manage_goods.setMinimumHeight(45)  # Make button taller
-        btn_manage_goods.setMinimumWidth(150)  # Make button wider
+        btn_manage_goods.setMinimumHeight(45)
+        btn_manage_goods.setMinimumWidth(150)
         btn_manage_goods.clicked.connect(self.manage_goods)
-        right_goods_layout.addWidget(btn_manage_goods)
+        right_goods_layout.addWidget(btn_manage_goods, 0, Qt.AlignmentFlag.AlignCenter if PYQT_VERSION == 6 else Qt.AlignCenter)
         
+        # Add stretch after button to center it vertically
         right_goods_layout.addStretch()
         config_splitter.addWidget(right_goods_widget)
         config_splitter.setStretchFactor(1, 1)
@@ -679,12 +893,15 @@ class BatchProcessingWindow(QMainWindow):
         customer_btn_add = ModernButton("+ Add Customer", primary=True)
         customer_btn_edit = ModernButton("Edit", primary=False)
         customer_btn_manage = ModernButton("Manage", primary=False)
+        blaster_btn_manage = ModernButton("Manage Blasters", primary=False)
         customer_btn_add.clicked.connect(self.add_customer)
         customer_btn_edit.clicked.connect(self.edit_selected_customer)
         customer_btn_manage.clicked.connect(self.manage_customers)
+        blaster_btn_manage.clicked.connect(self.manage_blasters)
         customer_btn_layout.addWidget(customer_btn_add)
         customer_btn_layout.addWidget(customer_btn_edit)
         customer_btn_layout.addWidget(customer_btn_manage)
+        customer_btn_layout.addWidget(blaster_btn_manage)
         customer_btn_layout.addStretch()
         customer_list_layout.addLayout(customer_btn_layout)
         
@@ -781,23 +998,493 @@ class BatchProcessingWindow(QMainWindow):
         main_layout.addLayout(action_layout)
         
         # Load initial data (with placeholder selections)
+        self.category_combo.setCurrentIndex(0)  # Set to placeholder "-- Select Category --"
         self.refresh_areas()
         self.area_combo.setCurrentIndex(0)  # Set to placeholder "-- Select Area --"
         self.refresh_vehicles()
         self.vehicle_combo.setCurrentIndex(0)  # Set to placeholder "-- Select Vehicle --"
         self.refresh_customer_list()
     
+    def _create_custom_dropdown_popup(self, combo: QComboBox, add_callback, manage_callback):
+        """Create a custom popup with scrollable list and fixed action buttons."""
+        if PYQT_VERSION == 5:
+            from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+        else:
+            from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+        
+        popup = QWidget()
+        if PYQT_VERSION == 6:
+            popup.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        else:
+            popup.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Scrollable list view
+        list_view = QListView()
+        list_view.setMinimumHeight(120)
+        list_view.setMaximumHeight(250)
+        list_view.setMinimumWidth(combo.width())
+        list_view.setFocus()
+        list_view.clicked.connect(lambda index: self._handle_popup_selection(combo, popup, index))
+        
+        # Add keyboard support
+        if PYQT_VERSION == 5:
+            from PyQt5.QtCore import QEvent
+        else:
+            from PyQt6.QtCore import QEvent
+        
+        def list_key_press(event):
+            if PYQT_VERSION == 6:
+                if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+                    current_index = list_view.currentIndex()
+                    if current_index.isValid():
+                        self._handle_popup_selection(combo, popup, current_index)
+                elif event.key() == Qt.Key.Key_Escape:
+                    popup.close()
+                else:
+                    QListView.keyPressEvent(list_view, event)
+            else:
+                if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                    current_index = list_view.currentIndex()
+                    if current_index.isValid():
+                        self._handle_popup_selection(combo, popup, current_index)
+                elif event.key() == Qt.Key_Escape:
+                    popup.close()
+                else:
+                    QListView.keyPressEvent(list_view, event)
+        
+        list_view.keyPressEvent = list_key_press
+        layout.addWidget(list_view)
+        
+        # Fixed button row at bottom
+        button_row = QWidget()
+        button_row.setStyleSheet("background-color: transparent;")
+        button_layout = QHBoxLayout(button_row)
+        button_layout.setContentsMargins(5, 5, 5, 5)
+        button_layout.setSpacing(5)
+        
+        add_btn = ModernButton("+ Add", primary=True)
+        add_btn.clicked.connect(lambda: self._handle_popup_action(popup, add_callback))
+        manage_btn = ModernButton("Manage", primary=False)
+        manage_btn.clicked.connect(lambda: self._handle_popup_action(popup, manage_callback))
+        
+        button_layout.addWidget(add_btn)
+        button_layout.addWidget(manage_btn)
+        layout.addWidget(button_row)
+        
+        popup.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+            }
+            QListView {
+                background-color: white;
+                border: none;
+                padding: 4px;
+                outline: 0;
+            }
+            QListView::item {
+                padding: 8px 10px;
+                border-radius: 5px;
+                color: #212529;
+            }
+            QListView::item:hover {
+                background-color: #f5f6f8;
+            }
+            QListView::item:selected {
+                background-color: #eaf2ff;
+                color: #0d6efd;
+            }
+            QScrollBar:vertical {
+                background-color: #e9ecef;
+                width: 12px;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #adb5bd;
+                min-height: 30px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #6c757d;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+                border: none;
+                background: transparent;
+            }
+            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+                width: 0px;
+                height: 0px;
+            }
+        """)
+        
+        combo._custom_popup = popup
+        combo._custom_list_view = list_view
+        return popup
+    
+    def _handle_popup_selection(self, combo, popup, index):
+        """Handle selection from custom popup."""
+        # Set the exact index - no offset needed
+        combo.setCurrentIndex(index.row())
+        popup.close()
+    
+    def _handle_popup_action(self, popup, callback):
+        """Handle action button click from popup."""
+        popup.close()
+        if callback:
+            callback()
+    
+    def _add_combo_keyboard_support(self, combo):
+        """Add keyboard support to combo box."""
+        if PYQT_VERSION == 5:
+            from PyQt5.QtCore import QEvent
+        else:
+            from PyQt6.QtCore import QEvent
+        
+        original_key_press = combo.keyPressEvent
+        
+        def combo_key_press(event):
+            # Check if this is area or vehicle combo
+            is_area_or_vehicle = combo == self.area_combo or combo == self.vehicle_combo
+            
+            if PYQT_VERSION == 6:
+                if event.key() == Qt.Key.Key_Down or event.key() == Qt.Key.Key_Up:
+                    # Check category for area/vehicle
+                    if is_area_or_vehicle and not self.current_category:
+                        QMessageBox.warning(self, "Category Required", "Please select a Category first.")
+                        return
+                    # Open popup if not already open
+                    if not hasattr(combo, '_custom_popup') or not combo._custom_popup.isVisible():
+                        self._show_custom_popup(combo)
+                    else:
+                        # Pass event to list view
+                        if hasattr(combo, '_custom_list_view'):
+                            QListView.keyPressEvent(combo._custom_list_view, event)
+                else:
+                    original_key_press(event)
+            else:
+                if event.key() == Qt.Key_Down or event.key() == Qt.Key_Up:
+                    # Check category for area/vehicle
+                    if is_area_or_vehicle and not self.current_category:
+                        QMessageBox.warning(self, "Category Required", "Please select a Category first.")
+                        return
+                    # Open popup if not already open
+                    if not hasattr(combo, '_custom_popup') or not combo._custom_popup.isVisible():
+                        self._show_custom_popup(combo)
+                    else:
+                        # Pass event to list view
+                        if hasattr(combo, '_custom_list_view'):
+                            QListView.keyPressEvent(combo._custom_list_view, event)
+                else:
+                    original_key_press(event)
+        
+        combo.keyPressEvent = combo_key_press
+    
+    def _check_category_and_show_popup(self, combo, field_name):
+        """Check if category is selected before showing popup."""
+        if not self.current_category:
+            QMessageBox.warning(
+                self,
+                "Category Required",
+                f"Please select a Category first before choosing {field_name}."
+            )
+            return
+        self._show_custom_popup(combo)
+    
+    def _show_custom_popup(self, combo):
+        """Show the custom popup for a combo box."""
+        if not hasattr(combo, '_custom_popup'):
+            return
+        
+        popup = combo._custom_popup
+        list_view = combo._custom_list_view
+        
+        # Create a model with all combo box items
+        if PYQT_VERSION == 5:
+            from PyQt5.QtGui import QStandardItemModel, QStandardItem
+        else:
+            from PyQt6.QtGui import QStandardItemModel, QStandardItem
+        
+        model = QStandardItemModel()
+        # Add all items from combo box
+        for i in range(combo.count()):
+            item = QStandardItem(combo.itemText(i))
+            item.setData(combo.itemData(i, Qt.ItemDataRole.UserRole), Qt.ItemDataRole.UserRole)
+            model.appendRow(item)
+        
+        list_view.setModel(model)
+        
+        # Set current selection in list view to match combo box
+        current_index = combo.currentIndex()
+        if current_index >= 0:
+            list_view.setCurrentIndex(model.index(current_index, 0))
+        
+        # Position popup below combo box
+        global_pos = combo.mapToGlobal(combo.rect().bottomLeft())
+        popup.move(global_pos)
+        popup.show()
+        popup.raise_()
+        popup.activateWindow()
+        list_view.setFocus()
+    
+    def _apply_professional_dropdown(self, combo: QComboBox):
+        """Style dropdowns to float cleanly with a subtle shadow on a transparent backdrop."""
+        view = QListView()
+        view.setSpacing(3)
+        try:
+            view.setFrameShape(QFrame.Shape.NoFrame)
+        except AttributeError:
+            view.setFrameShape(QFrame.NoFrame)
+        view.setUniformItemSizes(True)
+        try:
+            view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        except AttributeError:
+            view.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        
+        # Set consistent dimensions for both area and vehicle dropdowns
+        view.setMinimumWidth(combo.minimumWidth())
+        view.setMinimumHeight(150)
+        view.setMaximumHeight(280)
+        
+        if PYQT_VERSION == 6:
+            view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            view.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        else:
+            view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            view.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        try:
+            view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        except AttributeError:
+            view.setAttribute(Qt.WA_TranslucentBackground, True)
+        
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 3)
+        shadow.setColor(QColor(0, 0, 0, 35))
+        view.setGraphicsEffect(shadow)
+        
+        view.setStyleSheet("""
+            QListView {
+                background-color: #ffffff;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+                padding: 4px;
+                outline: 0;
+            }
+            QListView::item {
+                padding: 8px 10px;
+                border-radius: 5px;
+                color: #212529;
+            }
+            QListView::item:hover {
+                background-color: #f5f6f8;
+            }
+            QListView::item:selected {
+                background-color: #eaf2ff;
+                color: #0d6efd;
+            }
+            QScrollBar:vertical {
+                background-color: #e9ecef;
+                width: 12px;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #adb5bd;
+                min-height: 30px;
+                border-radius: 2px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #6c757d;
+            }
+            QScrollBar::add-line:vertical {
+                height: 0px;
+                border: none;
+                background: transparent;
+            }
+            QScrollBar::sub-line:vertical {
+                height: 0px;
+                border: none;
+                background: transparent;
+            }
+            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+                width: 0px;
+                height: 0px;
+                background: transparent;
+            }
+        """)
+        combo.setView(view)
+        
+        # Store the view reference and combo for later styling of action items
+        combo._custom_view = view
+        combo._needs_action_styling = True
+        
+        # Apply custom delegate for action buttons
+        if PYQT_VERSION == 5:
+            from PyQt5.QtWidgets import QStyledItemDelegate, QStyle
+            from PyQt5.QtGui import QPainter, QBrush, QPen
+            from PyQt5.QtCore import QRect
+        else:
+            from PyQt6.QtWidgets import QStyledItemDelegate, QStyle
+            from PyQt6.QtGui import QPainter, QBrush, QPen
+            from PyQt6.QtCore import QRect
+        
+        class ActionItemDelegate(QStyledItemDelegate):
+            def paint(self, painter, option, index):
+                data = index.data(Qt.ItemDataRole.UserRole)
+                
+                # Check if this is an action item
+                if isinstance(data, str) and (data.startswith("__cmd_")):
+                    painter.save()
+                    
+                    # Determine button color
+                    if "+ Add" in index.data(Qt.ItemDataRole.DisplayRole):
+                        bg_color = QColor(40, 167, 69)  # Green
+                        hover_color = QColor(33, 136, 56)
+                    else:  # Manage
+                        bg_color = QColor(0, 123, 255)  # Blue
+                        hover_color = QColor(0, 86, 179)
+                    
+                    # Use hover color if hovered
+                    if PYQT_VERSION == 6:
+                        is_hovered = option.state & QStyle.StateFlag.State_MouseOver
+                    else:
+                        is_hovered = option.state & QStyle.State_MouseOver
+                    
+                    if is_hovered:
+                        bg_color = hover_color
+                    
+                    # Draw button background
+                    rect = option.rect.adjusted(4, 2, -4, -2)
+                    if PYQT_VERSION == 6:
+                        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                        painter.setPen(QPen(Qt.PenStyle.NoPen))
+                    else:
+                        painter.setRenderHint(QPainter.Antialiasing)
+                        painter.setPen(QPen(Qt.NoPen))
+                    painter.setBrush(QBrush(bg_color))
+                    painter.drawRoundedRect(rect, 5, 5)
+                    
+                    # Draw text
+                    painter.setPen(QPen(QColor(255, 255, 255)))
+                    if PYQT_VERSION == 6:
+                        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, index.data(Qt.ItemDataRole.DisplayRole))
+                    else:
+                        painter.drawText(rect, Qt.AlignCenter, index.data(Qt.ItemDataRole.DisplayRole))
+                    
+                    painter.restore()
+                else:
+                    # Normal item
+                    super().paint(painter, option, index)
+        
+        view.setItemDelegate(ActionItemDelegate())
+    
+    def _open_simple_manager(self, title, fetch_items_fn, add_fn, edit_fn, delete_fn, display_key):
+        """Generic manager dialog for simple list-based entities."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QVBoxLayout(dialog)
+        list_widget = QListWidget()
+        layout.addWidget(list_widget)
+        
+        def refresh():
+            list_widget.clear()
+            for item in fetch_items_fn():
+                display = item.get(display_key, "") or "(No name)"
+                # Display customer names in uppercase
+                if display_key == "name" and title == "Manage Customers":
+                    display = display.upper() if display else "(No name)"
+                list_item = QListWidgetItem(display)
+                if PYQT_VERSION == 6:
+                    list_item.setData(Qt.ItemDataRole.UserRole, item)
+                else:
+                    list_item.setData(Qt.UserRole, item)
+                list_widget.addItem(list_item)
+        refresh()
+        
+        btn_row = QHBoxLayout()
+        btn_add = ModernButton("Add", primary=True)
+        btn_edit = ModernButton("Edit", primary=False)
+        btn_delete = ModernButton("Delete", primary=False)
+        btn_close = ModernButton("Close", primary=False)
+        btn_row.addWidget(btn_add)
+        btn_row.addWidget(btn_edit)
+        btn_row.addWidget(btn_delete)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+        
+        def current_item():
+            item = list_widget.currentItem()
+            if not item:
+                QMessageBox.warning(dialog, "Select Item", "Please select an entry first.")
+                return None
+            return item.data(Qt.ItemDataRole.UserRole)
+        
+        def add_action():
+            changed = add_fn()
+            if changed:
+                refresh()
+        def edit_action():
+            data = current_item()
+            if not data:
+                return
+            changed = edit_fn(data)
+            if changed:
+                refresh()
+        def delete_action():
+            data = current_item()
+            if not data:
+                return
+            changed = delete_fn(data)
+            if changed:
+                refresh()
+        
+        btn_add.clicked.connect(add_action)
+        btn_edit.clicked.connect(edit_action)
+        btn_delete.clicked.connect(delete_action)
+        btn_close.clicked.connect(dialog.close)
+        
+        dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
+    
+    def on_area_activated(self, index):
+        """Handle special commands from area dropdown"""
+        data = self.area_combo.itemData(index, Qt.ItemDataRole.UserRole)
+        if isinstance(data, str) and data.startswith("__cmd_area_"):
+            if data == "__cmd_area_add":
+                self.add_area()
+            elif data == "__cmd_area_manage":
+                self.manage_areas()
+            # restore previous valid selection
+            if hasattr(self, "_last_area_index") and self._last_area_index is not None:
+                self.area_combo.setCurrentIndex(self._last_area_index)
+            else:
+                self.area_combo.setCurrentIndex(0)
+            return
+        self._last_area_index = index
+    
     def on_category_changed(self):
         """Handle category selection"""
-        if self.category_detonator.isChecked():
-            self.current_category = "Detonator"
-        elif self.category_explosives.isChecked():
-            self.current_category = "Explosives"
+        # During initialization the signal may fire before widgets exist
+        if not hasattr(self, "area_combo"):
+            return
+        
+        # Get category from combo box
+        category_data = self.category_combo.currentData()
+        if category_data:
+            self.current_category = category_data
         else:
             self.current_category = None
         
         self.current_area_id = None
-        self.area_combo.setCurrentIndex(-1)
+        self.area_combo.setCurrentIndex(0)
         self.selected_customers = {}
         self.refresh_areas()
         self.refresh_customer_list()
@@ -813,8 +1500,11 @@ class BatchProcessingWindow(QMainWindow):
     
     def on_area_changed(self):
         """Handle area selection"""
-        if self.area_combo.currentIndex() > 0:  # > 0 because 0 is placeholder
-            self.current_area_id = self.area_combo.currentData()
+        data = self.area_combo.currentData()
+        if isinstance(data, str) and data.startswith("__cmd_area_"):
+            return
+        if self.area_combo.currentIndex() > 0 and data is not None:
+            self.current_area_id = data
             self.current_area_name = self.area_combo.currentText()
         else:
             self.current_area_id = None
@@ -861,7 +1551,7 @@ class BatchProcessingWindow(QMainWindow):
         for customer in customers:
             customer_id = customer['id']
             is_selected = customer_id in self.selected_customers
-            item_widget = CustomerItemWidget(customer_id, customer['name'], is_selected)
+            item_widget = CustomerItemWidget(customer_id, customer['name'], self.checkmark_icon_path, is_selected)
             item_widget.checkbox.toggled.connect(
                 lambda checked, cid=customer_id: self.on_customer_check(cid, checked)
             )
@@ -892,14 +1582,34 @@ class BatchProcessingWindow(QMainWindow):
                 invoice_no = self.auto_increment_number(base_invoice, 1) if base_invoice else ""
                 eway_doc_no = self.auto_increment_number(base_eway, 1) if base_eway else ""
                 
+                # Initialize blaster data from customer
+                blaster_id = customer.get('blaster_id')
+                blaster_data = {}
+                if blaster_id:
+                    blaster = self.db.get_blaster(blaster_id)
+                    if blaster:
+                        blaster_data = {
+                            'blaster_name': blaster.get('name', ''),
+                            'blaster_document_no': blaster.get('document_no', ''),
+                            'blaster_address': blaster.get('address', '')
+                        }
+                
                 self.selected_customers[customer_id] = {
                     'customer': customer,
                     'invoice_no': invoice_no,
                     'e_way_doc_no': eway_doc_no,
                     'items': [],
                     'place_of_supply': customer.get('address', '') or self.current_area_name or '',
+                    'gstin_unique_id': '',  # Start empty, user can fill it
+                    'blaster_id': blaster_id,
+                    'blaster_data': blaster_data,
                     'freight_charges': 0.0
                 }
+                
+                # When a customer is selected, automatically show their details
+                # so invoice fields and items section become visible.
+                self.expanded_customer_id = customer_id
+                self.show_customer_details(customer_id)
         else:
             if customer_id in self.selected_customers:
                 del self.selected_customers[customer_id]
@@ -953,7 +1663,7 @@ class BatchProcessingWindow(QMainWindow):
         header_layout = QHBoxLayout(header_frame)
         header_layout.setContentsMargins(0, 0, 0, 10)
         
-        name_label = QLabel(customer['name'])
+        name_label = QLabel(customer['name'].upper() if customer.get('name') else '')
         name_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529;")
         name_label.setWordWrap(True)  # Allow text wrapping
         name_label.setMaximumWidth(350)  # Limit width to prevent overflow
@@ -987,7 +1697,8 @@ class BatchProcessingWindow(QMainWindow):
                 label_widget = QLabel(f"<b>{label}:</b>")
                 label_widget.setMinimumWidth(100)
                 row_layout.addWidget(label_widget)
-                value_label = QLabel(str(value))
+                # Display in uppercase
+                value_label = QLabel(str(value).upper())
                 value_label.setWordWrap(True)  # Allow wrapping for long addresses
                 value_label.setMaximumWidth(400)
                 row_layout.addWidget(value_label, 1)
@@ -1000,70 +1711,336 @@ class BatchProcessingWindow(QMainWindow):
         # Invoice details (only if selected)
         if is_selected and customer_data:
             invoice_group = QGroupBox("Invoice Details")
-            invoice_layout = QVBoxLayout()
+            # Use a form layout so all labels/fields align nicely
+            if PYQT_VERSION == 5:
+                from PyQt5.QtWidgets import QFormLayout
+            else:
+                from PyQt6.QtWidgets import QFormLayout
+            invoice_layout = QFormLayout()
+            invoice_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            invoice_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            invoice_layout.setHorizontalSpacing(20)
+            invoice_layout.setVerticalSpacing(8)
+            
+            # Common style for key labels (left aligned with subtle border)
+            key_label_style = (
+                "font-size: 12px;"
+                "font-weight: bold;"
+                "color: #212529;"
+                "border: 1px solid #dee2e6;"
+                "border-radius: 4px;"
+                "padding: 4px 8px;"
+                "min-width: 140px;"
+                "background-color: #f8f9fa;"
+            )
             
             # Invoice No (Mandatory)
-            invoice_row = QHBoxLayout()
             invoice_label = QLabel("Invoice No: *")
-            invoice_label.setStyleSheet("font-weight: bold; color: #212529;")
-            invoice_row.addWidget(invoice_label)
+            invoice_label.setStyleSheet(key_label_style)
+            invoice_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             invoice_edit = QLineEdit(customer_data.get('invoice_no', ''))
             invoice_edit.setPlaceholderText("Enter invoice number (required)")
+            invoice_edit.setMaximumWidth(400)
             invoice_edit.textChanged.connect(
                 lambda text: self.update_customer_invoice_no(customer_id, text)
             )
-            invoice_row.addWidget(invoice_edit)
-            # Auto-increment button
-            btn_increment_invoice = ModernButton("+1", primary=False)
-            btn_increment_invoice.setMaximumWidth(50)
-            btn_increment_invoice.setToolTip("Auto-increment invoice number")
-            btn_increment_invoice.clicked.connect(
-                lambda: self.increment_customer_invoice(customer_id, invoice_edit)
-            )
-            invoice_row.addWidget(btn_increment_invoice)
-            invoice_layout.addLayout(invoice_row)
+            invoice_layout.addRow(invoice_label, invoice_edit)
             
             # E-Way Doc No
-            eway_row = QHBoxLayout()
             eway_label = QLabel("E-Way Document No:")
-            eway_row.addWidget(eway_label)
+            eway_label.setStyleSheet(key_label_style)
+            eway_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             eway_edit = QLineEdit(customer_data.get('e_way_doc_no', ''))
             eway_edit.setPlaceholderText("Enter E-Way document number")
+            eway_edit.setMaximumWidth(400)
             eway_edit.textChanged.connect(
                 lambda text: self.update_customer_eway_doc(customer_id, text)
             )
-            eway_row.addWidget(eway_edit)
-            # Auto-increment button
-            btn_increment_eway = ModernButton("+1", primary=False)
-            btn_increment_eway.setMaximumWidth(50)
-            btn_increment_eway.setToolTip("Auto-increment E-Way document number")
-            btn_increment_eway.clicked.connect(
-                lambda: self.increment_customer_eway(customer_id, eway_edit)
+            invoice_layout.addRow(eway_label, eway_edit)
+            
+            # Place of Supply (Editable)
+            place_label = QLabel("Place of Supply:")
+            place_label.setStyleSheet(key_label_style)
+            place_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            place_edit = QLineEdit(customer_data.get('place_of_supply', customer.get('address', '') or self.current_area_name or ''))
+            place_edit.setPlaceholderText("Enter place of supply")
+            place_edit.setMaximumWidth(400)
+            place_edit.textChanged.connect(
+                lambda text: self.update_customer_place_of_supply(customer_id, text)
             )
-            eway_row.addWidget(btn_increment_eway)
-            invoice_layout.addLayout(eway_row)
+            invoice_layout.addRow(place_label, place_edit)
+            
+            # GSTIN/Unique ID (Editable) - starts empty
+            gstin_label = QLabel("GSTIN/Unique ID:")
+            gstin_label.setStyleSheet(key_label_style)
+            gstin_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            gstin_edit = QLineEdit(customer_data.get('gstin_unique_id', ''))
+            gstin_edit.setPlaceholderText("Enter GSTIN/Unique ID (optional)")
+            gstin_edit.setMaximumWidth(400)
+            gstin_edit.textChanged.connect(
+                lambda text: self.update_customer_gstin_unique_id(customer_id, text)
+            )
+            invoice_layout.addRow(gstin_label, gstin_edit)
             
             invoice_group.setLayout(invoice_layout)
             self.details_layout.addWidget(invoice_group)
             
-            # Items section
+            # Blaster Details (Selectable with management) - always show if customer is selected
+            blaster_group = QGroupBox("Blaster Details")
+            # Use a form layout for aligned labels/fields
+            if PYQT_VERSION == 5:
+                from PyQt5.QtWidgets import QFormLayout
+            else:
+                from PyQt6.QtWidgets import QFormLayout
+            blaster_layout = QFormLayout()
+            blaster_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            blaster_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            blaster_layout.setHorizontalSpacing(20)
+            blaster_layout.setVerticalSpacing(8)
+            
+            # Reuse the same key label style as invoice section
+            blaster_key_label_style = (
+                "font-size: 12px;"
+                "font-weight: bold;"
+                "color: #212529;"
+                "border: 1px solid #dee2e6;"
+                "border-radius: 4px;"
+                "padding: 4px 8px;"
+                "min-width: 140px;"
+                "background-color: #f8f9fa;"
+            )
+            
+            # Blaster selection row
+            blaster_select_label = QLabel("Blaster:")
+            blaster_select_label.setStyleSheet(blaster_key_label_style)
+            blaster_select_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            # Blaster combo box - match Area/Vehicle width
+            blaster_combo = NoWheelComboBox()
+            blaster_combo.setMinimumWidth(180)
+            blaster_combo.setMaximumWidth(180)
+            blaster_combo.setMinimumHeight(45)
+            blaster_combo.setEditable(False)
+            blaster_combo.setStyleSheet(self.dropdown_field_style)
+            blasters = self.db.get_blasters()
+            blaster_combo.addItem("-- No Blaster --", None)
+            
+            # Get current blaster_id from customer_data or customer
+            current_blaster_id = customer_data.get('blaster_id') or customer.get('blaster_id')
+            
+            # Add all blasters to combo
+            for blaster in blasters:
+                blaster_combo.addItem(blaster['name'], blaster['id'])
+            
+            # Set current selection after all items are added
+            if current_blaster_id:
+                index = blaster_combo.findData(current_blaster_id)
+                if index >= 0:
+                    blaster_combo.setCurrentIndex(index)
+            
+            # Disable default popup, use custom one
+            blaster_combo.setMaxVisibleItems(0)
+            blaster_combo.view().setVisible(False)
+            
+            # Create wrapper functions for callbacks
+            def add_blaster_callback():
+                self.add_blaster_from_details(customer_id, blaster_combo)
+            
+            def manage_blasters_callback():
+                self.manage_blasters_from_details(customer_id, blaster_combo)
+            
+            # Create custom popup with fixed buttons
+            self._create_custom_dropdown_popup(blaster_combo, add_blaster_callback, manage_blasters_callback)
+            # Override showPopup to use custom popup
+            blaster_combo.showPopup = lambda: self._show_custom_popup(blaster_combo)
+            
+            blaster_layout.addRow(blaster_select_label, blaster_combo)
+            
+            # Function to update blaster fields when selection changes
+            def on_blaster_selected():
+                blaster_id = blaster_combo.currentData()
+                if blaster_id:
+                    blaster = self.db.get_blaster(blaster_id)
+                    if blaster:
+                        blaster_doc_edit.setText(blaster.get('document_no', '') or '')
+                        blaster_addr_edit.setText(blaster.get('address', '') or '')
+                        # Update customer_data
+                        if 'blaster_data' not in customer_data:
+                            customer_data['blaster_data'] = {}
+                        customer_data['blaster_id'] = blaster_id
+                        customer_data['blaster_data']['blaster_name'] = blaster.get('name', '')
+                        customer_data['blaster_data']['blaster_document_no'] = blaster.get('document_no', '')
+                        customer_data['blaster_data']['blaster_address'] = blaster.get('address', '')
+                else:
+                    blaster_doc_edit.clear()
+                    blaster_addr_edit.clear()
+                    if 'blaster_data' in customer_data:
+                        customer_data['blaster_data'] = {}
+                    customer_data['blaster_id'] = None
+            
+            # Get initial blaster data and set combo box
+            blaster_data = customer_data.get('blaster_data', {})
+            if not blaster_data and current_blaster_id:
+                blaster = self.db.get_blaster(current_blaster_id)
+                if blaster:
+                    blaster_data = {
+                        'blaster_name': blaster.get('name', ''),
+                        'blaster_document_no': blaster.get('document_no', ''),
+                        'blaster_address': blaster.get('address', '')
+                    }
+                    customer_data['blaster_data'] = blaster_data
+                    customer_data['blaster_id'] = current_blaster_id
+                    # Set combo box to current blaster
+                    index = blaster_combo.findData(current_blaster_id)
+                    if index >= 0:
+                        blaster_combo.setCurrentIndex(index)
+            
+            blaster_doc_value = blaster_data.get('blaster_document_no', '') or customer.get('blaster_document_no', '')
+            blaster_addr_value = blaster_data.get('blaster_address', '') or customer.get('blaster_address', '')
+            
+            # Blaster Document No (Editable)
+            blaster_doc_label = QLabel("Document No:")
+            blaster_doc_label.setStyleSheet(blaster_key_label_style)
+            blaster_doc_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            blaster_doc_edit = QLineEdit(blaster_doc_value)
+            blaster_doc_edit.setPlaceholderText("Enter document number")
+            blaster_doc_edit.setMaximumWidth(400)
+            blaster_doc_edit.textChanged.connect(
+                lambda text: self.update_customer_blaster_doc(customer_id, text)
+            )
+            blaster_layout.addRow(blaster_doc_label, blaster_doc_edit)
+            
+            # Blaster Address (Editable)
+            blaster_addr_label = QLabel("Address:")
+            blaster_addr_label.setStyleSheet(blaster_key_label_style)
+            blaster_addr_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            blaster_addr_edit = QLineEdit(blaster_addr_value)
+            blaster_addr_edit.setPlaceholderText("Enter blaster address")
+            blaster_addr_edit.setMaximumWidth(400)
+            blaster_addr_edit.textChanged.connect(
+                lambda text: self.update_customer_blaster_address(customer_id, text)
+            )
+            blaster_layout.addRow(blaster_addr_label, blaster_addr_edit)
+            
+            # Connect signal after fields are created to avoid errors
+            blaster_combo.currentIndexChanged.connect(lambda: on_blaster_selected())
+            
+            blaster_group.setLayout(blaster_layout)
+            self.details_layout.addWidget(blaster_group)
+            
+            # Freight Charges (Editable)
+            freight_row = QHBoxLayout()
+            freight_label = QLabel("Freight Charges:")
+            freight_label.setMinimumWidth(100)
+            freight_row.addWidget(freight_label)
+            freight_edit = QLineEdit()
+            freight_value = customer_data.get('freight_charges', 0.0)
+            freight_edit.setText(f"{freight_value:.2f}" if freight_value else "0.00")
+            freight_edit.setPlaceholderText("0.00")
+            freight_edit.setMaximumWidth(400)
+            freight_edit.textChanged.connect(
+                lambda text: self.update_customer_freight_charges(customer_id, text)
+            )
+            freight_row.addWidget(freight_edit)
+            freight_row.addStretch()
+            self.details_layout.addLayout(freight_row)
+            
+            # Items section - Excel-like table
             items_group = QGroupBox("Goods Selection")
             items_layout = QVBoxLayout()
+            items_layout.setContentsMargins(15, 15, 15, 15)  # Add margins so borders are visible
+            items_layout.setSpacing(10)  # Add spacing between button and table
             
             add_item_btn = ModernButton("+ Add Good", primary=True)
             add_item_btn.clicked.connect(lambda: self.add_good_to_customer(customer_id))
             items_layout.addWidget(add_item_btn)
             
-            # Items table
+            # Create table - NO separate header widget, just rows!
             items_table = QTableWidget()
             items_table.setColumnCount(6)
-            items_table.setHorizontalHeaderLabels([
-                "Description", "HSN", "Qty", "Rate", "Total", "Actions"
-            ])
-            items_table.horizontalHeader().setStretchLastSection(True)
-            items_table.setAlternatingRowColors(True)
-            items_layout.addWidget(items_table)
+            items_table.setRowCount(1)  # Start with 1 row for header
             
+            # HIDE the built-in header widgets - we'll use row 0 as header
+            items_table.horizontalHeader().setVisible(False)
+            items_table.verticalHeader().setVisible(False)
+            
+            # Excel-like styling - use cell borders for complete grid
+            items_table.setStyleSheet("""
+                QTableWidget {
+                    background-color: white;
+                    border: 1px solid #c0c0c0;
+                    outline: none;
+                }
+                QTableWidget::item {
+                    border: 1px solid #c0c0c0;
+                    padding: 2px;
+                    color: #000000;
+                }
+                QTableWidget::item:selected {
+                    background-color: #cfe2f3;
+                }
+            """)
+            
+            # Set column widths
+            items_table.setColumnWidth(0, 220)  # Description
+            items_table.setColumnWidth(1, 90)   # HSN
+            items_table.setColumnWidth(2, 60)   # Qty
+            items_table.setColumnWidth(3, 90)   # Rate
+            items_table.setColumnWidth(4, 90)   # Total
+            items_table.setColumnWidth(5, 120)  # Actions
+            
+            # Create header row (row 0) with grey background
+            header_labels = ["Description", "HSN", "Qty", "Rate", "Total", "Actions"]
+            for col, label in enumerate(header_labels):
+                header_item = QTableWidgetItem(label)
+                header_item.setBackground(QColor("#d9d9d9"))
+                header_item.setForeground(QColor("#000000"))
+                if PYQT_VERSION == 5:
+                    from PyQt5.QtGui import QFont
+                else:
+                    from PyQt6.QtGui import QFont
+                font = QFont()
+                font.setBold(True)
+                font.setPointSize(10)
+                header_item.setFont(font)
+                header_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                try:
+                    header_item.setFlags(header_item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsEditable)
+                except:
+                    header_item.setFlags(header_item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEditable)
+                items_table.setItem(0, col, header_item)
+            
+            # Set header row height
+            items_table.setRowHeight(0, 32)
+            
+            # Table settings
+            items_table.setShowGrid(False)  # Using cell borders instead
+            items_table.setMinimumHeight(150)
+            items_table.setMaximumHeight(400)
+            
+            # Add small left margin to push content right and make left border visible
+            items_table.setViewportMargins(3, 0, 0, 0)
+            
+            items_table.setAlternatingRowColors(False)
+            
+            # Disable scrollbars and set size policy
+            try:
+                items_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                items_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+                items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+                items_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+                items_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            except AttributeError:
+                items_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                items_table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                items_table.setSelectionBehavior(QTableWidget.SelectRows)
+                items_table.setSelectionMode(QTableWidget.SingleSelection)
+                items_table.setEditTriggers(QTableWidget.NoEditTriggers)
+            
+            # Calculate exact width: column widths + frame width + left viewport margin
+            total_width = 220 + 90 + 60 + 90 + 90 + 120 + items_table.frameWidth() * 2 + 5
+            items_table.setFixedWidth(total_width)
+            
+            items_layout.addWidget(items_table, 0, Qt.AlignmentFlag.AlignLeft)
             items_group.setLayout(items_layout)
             self.details_layout.addWidget(items_group)
             
@@ -1100,6 +2077,91 @@ class BatchProcessingWindow(QMainWindow):
         if customer_id in self.selected_customers:
             self.selected_customers[customer_id]['e_way_doc_no'] = eway_doc
     
+    def update_customer_place_of_supply(self, customer_id, place_of_supply):
+        """Update place of supply"""
+        if customer_id in self.selected_customers:
+            self.selected_customers[customer_id]['place_of_supply'] = place_of_supply
+    
+    def update_customer_gstin_unique_id(self, customer_id, gstin_unique_id):
+        """Update GSTIN/Unique ID"""
+        if customer_id in self.selected_customers:
+            self.selected_customers[customer_id]['gstin_unique_id'] = gstin_unique_id
+    
+    def update_customer_blaster_name(self, customer_id, blaster_name):
+        """Update blaster name"""
+        if customer_id in self.selected_customers:
+            customer_data = self.selected_customers[customer_id]
+            if 'blaster_data' not in customer_data:
+                customer_data['blaster_data'] = {}
+            customer_data['blaster_data']['blaster_name'] = blaster_name
+    
+    def update_customer_blaster_doc(self, customer_id, blaster_doc):
+        """Update blaster document number"""
+        if customer_id in self.selected_customers:
+            customer_data = self.selected_customers[customer_id]
+            if 'blaster_data' not in customer_data:
+                customer_data['blaster_data'] = {}
+            customer_data['blaster_data']['blaster_document_no'] = blaster_doc
+    
+    def update_customer_blaster_address(self, customer_id, blaster_address):
+        """Update blaster address"""
+        if customer_id in self.selected_customers:
+            customer_data = self.selected_customers[customer_id]
+            if 'blaster_data' not in customer_data:
+                customer_data['blaster_data'] = {}
+            customer_data['blaster_data']['blaster_address'] = blaster_address
+    
+    def update_customer_freight_charges(self, customer_id, freight_charges):
+        """Update freight charges"""
+        if customer_id in self.selected_customers:
+            try:
+                value = float(freight_charges) if freight_charges else 0.0
+                self.selected_customers[customer_id]['freight_charges'] = value
+            except ValueError:
+                # If invalid input, keep previous value or set to 0
+                pass
+    
+    def add_blaster_from_details(self, customer_id, blaster_combo):
+        """Add a new blaster from customer details section"""
+        from dialogs_modern import AddBlasterDialog
+        dialog = AddBlasterDialog(self, self.db)
+        result = dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
+        if result == DIALOG_ACCEPTED:
+            # Refresh blaster combo
+            blaster_combo.clear()
+            blaster_combo.addItem("-- No Blaster --", None)
+            blasters = self.db.get_blasters()
+            current_blaster_id = None
+            if customer_id in self.selected_customers:
+                current_blaster_id = self.selected_customers[customer_id].get('blaster_id')
+            
+            for blaster in blasters:
+                blaster_combo.addItem(blaster['name'], blaster['id'])
+                if blaster['id'] == current_blaster_id:
+                    blaster_combo.setCurrentIndex(blaster_combo.count() - 1)
+            
+            # Select the newly added blaster
+            new_blaster = blasters[-1]  # Last added
+            index = blaster_combo.findData(new_blaster['id'])
+            if index >= 0:
+                blaster_combo.setCurrentIndex(index)
+    
+    def manage_blasters_from_details(self, customer_id, blaster_combo):
+        """Manage blasters from customer details section"""
+        self.manage_blasters()
+        # Refresh blaster combo after management
+        blaster_combo.clear()
+        blaster_combo.addItem("-- No Blaster --", None)
+        blasters = self.db.get_blasters()
+        current_blaster_id = None
+        if customer_id in self.selected_customers:
+            current_blaster_id = self.selected_customers[customer_id].get('blaster_id')
+        
+        for blaster in blasters:
+            blaster_combo.addItem(blaster['name'], blaster['id'])
+            if blaster['id'] == current_blaster_id:
+                blaster_combo.setCurrentIndex(blaster_combo.count() - 1)
+    
     def increment_customer_invoice(self, customer_id, invoice_edit):
         """Increment invoice number for a customer"""
         current_value = invoice_edit.text().strip()
@@ -1130,18 +2192,108 @@ class BatchProcessingWindow(QMainWindow):
         table = customer_data['items_table']
         items = customer_data['items']
         
-        table.setRowCount(len(items))
-        for row, item in enumerate(items):
-            table.setItem(row, 0, QTableWidgetItem(item.get('description', '')))
-            table.setItem(row, 1, QTableWidgetItem(item.get('hsn_code', '')))
-            table.setItem(row, 2, QTableWidgetItem(str(item.get('qty', 0))))
-            table.setItem(row, 3, QTableWidgetItem(f"{item.get('rate', 0):.2f}"))
-            table.setItem(row, 4, QTableWidgetItem(f"{item.get('total_amount', 0):.2f}"))
+        # Set row count: 1 for header + number of items
+        table.setRowCount(1 + len(items))
+        
+        # Recreate header row (row 0)
+        header_labels = ["Description", "HSN", "Qty", "Rate", "Total", "Actions"]
+        for col, label in enumerate(header_labels):
+            header_item = QTableWidgetItem(label)
+            header_item.setBackground(QColor("#d9d9d9"))
+            header_item.setForeground(QColor("#000000"))
+            if PYQT_VERSION == 5:
+                from PyQt5.QtGui import QFont
+            else:
+                from PyQt6.QtGui import QFont
+            font = QFont()
+            font.setBold(True)
+            font.setPointSize(10)
+            header_item.setFont(font)
+            header_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            try:
+                header_item.setFlags(header_item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsEditable)
+            except:
+                header_item.setFlags(header_item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEditable)
+            table.setItem(0, col, header_item)
+        
+        table.setRowHeight(0, 32)
+        
+        # Add data rows starting from row 1
+        for idx, item in enumerate(items):
+            row = idx + 1  # Row 0 is header, data starts at row 1
+            
+            # Data columns
+            desc_item = QTableWidgetItem(item.get('description', ''))
+            table.setItem(row, 0, desc_item)
+            
+            hsn_item = QTableWidgetItem(item.get('hsn_code', ''))
+            hsn_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            table.setItem(row, 1, hsn_item)
+            
+            qty_item = QTableWidgetItem(str(item.get('qty', 0)))
+            qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            table.setItem(row, 2, qty_item)
+            
+            rate_item = QTableWidgetItem(f"₹{item.get('rate', 0):.2f}")
+            rate_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            table.setItem(row, 3, rate_item)
+            
+            total_item = QTableWidgetItem(f"₹{item.get('total_amount', 0):.2f}")
+            total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            table.setItem(row, 4, total_item)
+            
+            # Actions column with compact Edit and Delete buttons
+            action_widget = QWidget()
+            action_widget.setStyleSheet("background-color: transparent;")
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(1, 0, 1, 0)
+            action_layout.setSpacing(2)
+            
+            # Edit button
+            edit_btn = QPushButton("Edit")
+            edit_btn.setFixedSize(45, 22)
+            edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            edit_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #4472c4;
+                    color: white;
+                    border: none;
+                    border-radius: 2px;
+                    font-size: 9px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #2f5597;
+                }
+            """)
+            edit_btn.clicked.connect(lambda checked, i=idx: self.edit_customer_item(customer_id, i))
+            action_layout.addWidget(edit_btn)
             
             # Delete button
-            delete_btn = ModernButton("Delete", primary=False)
-            delete_btn.clicked.connect(lambda checked, r=row: self.delete_customer_item(customer_id, r))
-            table.setCellWidget(row, 5, delete_btn)
+            delete_btn = QPushButton("Delete")
+            delete_btn.setFixedSize(50, 22)
+            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #c65911;
+                    color: white;
+                    border: none;
+                    border-radius: 2px;
+                    font-size: 9px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #a04a0d;
+                }
+            """)
+            delete_btn.clicked.connect(lambda checked, i=idx: self.delete_customer_item(customer_id, i))
+            action_layout.addWidget(delete_btn)
+            
+            action_layout.addStretch()
+            table.setCellWidget(row, 5, action_widget)
+            
+            # Set consistent row height for data rows
+            table.setRowHeight(row, 32)
     
     def add_good_to_customer(self, customer_id):
         """Add good to customer"""
@@ -1170,6 +2322,57 @@ class BatchProcessingWindow(QMainWindow):
                 items.pop(row)
                 self.refresh_customer_items(customer_id)
     
+    def edit_customer_item(self, customer_id, row):
+        """Edit an existing item for a customer (change quantity, recalc totals)"""
+        if customer_id not in self.selected_customers:
+            return
+        
+        items = self.selected_customers[customer_id]['items']
+        if not (0 <= row < len(items)):
+            return
+        
+        item = items[row]
+        current_qty = float(item.get('qty', 0) or 0)
+        if current_qty <= 0:
+            current_qty = 1.0
+        
+        # Ask for new quantity using a simple dialog
+        qty, ok = QInputDialog.getDouble(
+            self,
+            "Edit Quantity",
+            f"Enter new quantity for {item.get('description', '')}:",
+            current_qty,
+            0.01,
+            999999,
+            2
+        )
+        if not ok:
+            return
+        
+        # Recalculate totals with same rate and tax rates
+        rate = float(item.get('rate', 0) or 0)
+        total = qty * rate
+        taxable_value = total
+        cgst_rate = float(item.get('cgst_rate', self.default_cgst_rate))
+        sgst_rate = float(item.get('sgst_rate', self.default_sgst_rate))
+        cgst_rs = (taxable_value * cgst_rate) / 100
+        sgst_rs = (taxable_value * sgst_rate) / 100
+        total_amount = total + cgst_rs + sgst_rs
+        
+        item.update({
+            'qty': qty,
+            'rate': rate,
+            'total': total,
+            'taxable_value': taxable_value,
+            'cgst_rate': cgst_rate,
+            'cgst_rs': cgst_rs,
+            'sgst_rate': sgst_rate,
+            'sgst_rs': sgst_rs,
+            'total_amount': total_amount,
+        })
+        
+        self.refresh_customer_items(customer_id)
+    
     def add_area(self):
         """Add new area"""
         dialog = AddAreaDialog(self, self.db)
@@ -1184,8 +2387,47 @@ class BatchProcessingWindow(QMainWindow):
                 self.area_combo.setCurrentIndex(index)
     
     def manage_areas(self):
-        """Manage areas"""
-        QMessageBox.information(self, "Info", "Area management - to be implemented in future version")
+        """Manage areas (add, rename, delete)"""
+        def add_fn():
+            dialog = AddAreaDialog(self, self.db)
+            result = dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
+            if result == DIALOG_ACCEPTED:
+                self.refresh_areas()
+                return True
+            return False
+        
+        def edit_fn(area):
+            new_name, ok = QInputDialog.getText(self, "Rename Area", "Area name:", text=area.get('name', ''))
+            if ok and new_name.strip():
+                try:
+                    self.db.update_location(area['id'], new_name.strip())
+                    self.refresh_areas()
+                    return True
+                except Exception as e:
+                    QMessageBox.warning(self, "Error", str(e))
+            return False
+        
+        def delete_fn(area):
+            reply = QMessageBox.question(
+                self, "Delete Area",
+                f"Delete area '{area.get('name', '')}'? This will remove the area reference from customers.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.db.delete_location(area['id'])
+                self.refresh_areas()
+                self.refresh_customer_list()
+                return True
+            return False
+        
+        self._open_simple_manager(
+            "Manage Areas",
+            self.db.get_locations,
+            add_fn,
+            edit_fn,
+            delete_fn,
+            "name"
+        )
     
     def add_vehicle(self):
         """Add new vehicle"""
@@ -1207,11 +2449,67 @@ class BatchProcessingWindow(QMainWindow):
                     self.vehicle_combo.setCurrentIndex(index)
     
     def manage_vehicles(self):
-        """Manage vehicles"""
-        QMessageBox.information(self, "Info", "Vehicle management - to be implemented in future version")
+        """Manage vehicles (add, rename, delete)"""
+        def add_fn():
+            dialog = AddVehicleDialog(self, self.db)
+            result = dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
+            if result == DIALOG_ACCEPTED:
+                self.refresh_vehicles()
+                return True
+            return False
+        
+        def edit_fn(vehicle):
+            new_no, ok = QInputDialog.getText(self, "Rename Vehicle", "Vehicle number:", text=vehicle.get('vehicle_number', ''))
+            if ok and new_no.strip():
+                try:
+                    self.db.update_vehicle(vehicle['id'], new_no.strip())
+                    self.refresh_vehicles()
+                    return True
+                except Exception as e:
+                    QMessageBox.warning(self, "Error", str(e))
+            return False
+        
+        def delete_fn(vehicle):
+            reply = QMessageBox.question(
+                self, "Delete Vehicle",
+                f"Delete vehicle '{vehicle.get('vehicle_number', '')}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.db.delete_vehicle(vehicle['id'])
+                self.refresh_vehicles()
+                return True
+            return False
+        
+        self._open_simple_manager(
+            "Manage Vehicles",
+            self.db.get_vehicles,
+            add_fn,
+            edit_fn,
+            delete_fn,
+            "vehicle_number"
+        )
+    
+    def on_vehicle_activated(self, index):
+        """Handle special commands from vehicle dropdown"""
+        data = self.vehicle_combo.itemData(index, Qt.ItemDataRole.UserRole)
+        if isinstance(data, str) and data.startswith("__cmd_vehicle_"):
+            if data == "__cmd_vehicle_add":
+                self.add_vehicle()
+            elif data == "__cmd_vehicle_manage":
+                self.manage_vehicles()
+            if hasattr(self, "_last_vehicle_index") and self._last_vehicle_index is not None:
+                self.vehicle_combo.setCurrentIndex(self._last_vehicle_index)
+            else:
+                self.vehicle_combo.setCurrentIndex(0)
+            return
+        self._last_vehicle_index = index
     
     def add_customer(self):
         """Add new customer"""
+        if not self.current_category:
+            QMessageBox.warning(self, "Category Required", "Please select a Category first.")
+            return
         if not self.current_area_id:
             QMessageBox.warning(self, "Warning", "Please select an area first")
             return
@@ -1265,8 +2563,131 @@ class BatchProcessingWindow(QMainWindow):
                     self.show_customer_details(customer_id)
     
     def manage_customers(self):
-        """Manage customers"""
-        QMessageBox.information(self, "Info", "Customer management - to be implemented in future version")
+        """Manage customers for the selected area"""
+        if not self.current_area_id:
+            QMessageBox.warning(self, "Warning", "Please select an area first")
+            return
+        
+        def add_fn():
+            self.add_customer()
+            return True
+        
+        def edit_fn(customer):
+            full = self.db.get_customer(customer['id'])
+            if not full:
+                QMessageBox.warning(self, "Error", "Customer not found")
+                return False
+            dialog = AddCustomerDialog(self, self.db, customer=full, area_id=self.current_area_id)
+            result = dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
+            if result == DIALOG_ACCEPTED:
+                self.refresh_customer_list()
+                if self.expanded_customer_id == customer['id']:
+                    self.show_customer_details(customer['id'])
+                return True
+            return False
+        
+        def delete_fn(customer):
+            reply = QMessageBox.question(
+                self, "Delete Customer",
+                f"Delete customer '{customer.get('name', '').upper() if customer.get('name') else ''}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.db.delete_customer(customer['id'])
+                self.refresh_customer_list()
+                return True
+            return False
+        
+        self._open_simple_manager(
+            "Manage Customers",
+            lambda: self.db.get_customers(location_id=self.current_area_id),
+            add_fn,
+            edit_fn,
+            delete_fn,
+            "name"
+        )
+
+    def manage_blasters(self):
+        """Manage blasters"""
+        def add_fn():
+            dialog = AddBlasterDialog(self, self.db)
+            result = dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
+            return result == DIALOG_ACCEPTED
+        
+        def edit_fn(blaster):
+            editor = QDialog(self)
+            editor.setWindowTitle("Edit Blaster")
+            layout = QVBoxLayout(editor)
+            
+            name_row = QHBoxLayout()
+            name_row.addWidget(QLabel("Name *:"))
+            name_edit = QLineEdit()
+            name_edit.setText(blaster.get('name', ''))
+            name_row.addWidget(name_edit)
+            layout.addLayout(name_row)
+            
+            doc_row = QHBoxLayout()
+            doc_row.addWidget(QLabel("Document No:"))
+            doc_edit = QLineEdit()
+            doc_edit.setText(blaster.get('document_no', ''))
+            doc_row.addWidget(doc_edit)
+            layout.addLayout(doc_row)
+            
+            address_row = QVBoxLayout()
+            address_row.addWidget(QLabel("Address:"))
+            address_edit = QTextEdit()
+            address_edit.setMaximumHeight(80)
+            address_edit.setText(blaster.get('address', ''))
+            address_row.addWidget(address_edit)
+            layout.addLayout(address_row)
+            
+            btn_row = QHBoxLayout()
+            btn_save = ModernButton("Save", primary=True)
+            btn_cancel = ModernButton("Cancel", primary=False)
+            btn_row.addStretch()
+            btn_row.addWidget(btn_cancel)
+            btn_row.addWidget(btn_save)
+            layout.addLayout(btn_row)
+            
+            saved = {"ok": False}
+            def save():
+                name = name_edit.text().strip()
+                if not name:
+                    QMessageBox.warning(editor, "Error", "Name is required")
+                    return
+                self.db.update_blaster(
+                    blaster['id'],
+                    name,
+                    doc_edit.text().strip(),
+                    address_edit.toPlainText().strip()
+                )
+                saved["ok"] = True
+                editor.accept()
+            btn_save.clicked.connect(save)
+            btn_cancel.clicked.connect(editor.reject)
+            
+            editor.exec_() if PYQT_VERSION == 5 else editor.exec()
+            return saved["ok"]
+        
+        def delete_fn(blaster):
+            reply = QMessageBox.question(
+                self, "Delete Blaster",
+                f"Delete blaster '{blaster.get('name', '')}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.db.delete_blaster(blaster['id'])
+                return True
+            return False
+        
+        self._open_simple_manager(
+            "Manage Blasters",
+            self.db.get_blasters,
+            add_fn,
+            edit_fn,
+            delete_fn,
+            "name"
+        )
     
     def manage_goods(self):
         """Manage goods"""
@@ -1279,12 +2700,12 @@ class BatchProcessingWindow(QMainWindow):
     
     def generate_pdfs(self):
         """Generate PDFs for selected customers"""
-        if not self.selected_customers:
-            QMessageBox.warning(self, "Warning", "Please select at least one customer")
+        if not self.current_category:
+            QMessageBox.warning(self, "Category Required", "Please select a Category first.")
             return
         
-        if not self.current_category:
-            QMessageBox.warning(self, "Warning", "Please select a category")
+        if not self.selected_customers:
+            QMessageBox.warning(self, "Warning", "Please select at least one customer")
             return
         
         if not self.current_area_id:
@@ -1302,7 +2723,7 @@ class BatchProcessingWindow(QMainWindow):
             invoice_no = customer_data.get('invoice_no', '').strip()
             if not invoice_no:
                 customer_name = customer_data['customer'].get('name', 'Unknown')
-                missing_invoices.append(customer_name)
+                missing_invoices.append(customer_name.upper() if customer_name else 'Unknown')
         
         if missing_invoices:
             QMessageBox.warning(self, "Warning", 
@@ -1316,7 +2737,7 @@ class BatchProcessingWindow(QMainWindow):
             date_of_supply = self.date_edit.date().toString("dd-MM-yyyy")
         vehicle_number = self.vehicle_combo.currentText()
         mode_of_transport = "Road"  # Default
-        e_way_bill_no = "5019 3382 6386"  # Default
+        e_way_bill_no = self.eway_bill_edit.text().strip()  # Get from configuration input
         
         # Ask for save file path (single PDF file)
         default_filename = f"Delivery_Bills_{date_of_supply.replace('-', '_')}.pdf"
@@ -1345,10 +2766,11 @@ class BatchProcessingWindow(QMainWindow):
                 rounded_total = self._round_total(grand_total)
                 total_in_words = number_to_words(rounded_total) if rounded_total > 0 else 'Zero'
                 
-                # Get blaster info
-                blaster_name = customer.get('blaster_name', '')
-                blaster_doc = customer.get('blaster_document_no', '')
-                blaster_address = customer.get('blaster_address', '')
+                # Get blaster info - check customer_data first (editable), then customer (from DB)
+                blaster_data = customer_data.get('blaster_data', {})
+                blaster_name = blaster_data.get('blaster_name') or customer.get('blaster_name', '')
+                blaster_doc = blaster_data.get('blaster_document_no') or customer.get('blaster_document_no', '')
+                blaster_address = blaster_data.get('blaster_address') or customer.get('blaster_address', '')
                 
                 # Ensure all required fields have default values
                 invoice_data = {
@@ -1366,7 +2788,7 @@ class BatchProcessingWindow(QMainWindow):
                     'e_way_document_no': customer_data.get('e_way_doc_no', ''),
                     'place_of_supply': customer_data.get('place_of_supply', '') or customer.get('address', ''),
                     'state_code': '33',
-                    'gstin_unique_id': customer.get('gstin', ''),
+                    'gstin_unique_id': customer_data.get('gstin_unique_id', ''),
                     'items': items or [],
                     'freight_charges': float(freight) if freight else 0.0,
                     'grand_total': float(rounded_total),
@@ -1415,8 +2837,7 @@ class BatchProcessingWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             # Clear category selection
-            self.category_detonator.setChecked(False)
-            self.category_explosives.setChecked(False)
+            self.category_combo.setCurrentIndex(0)  # Reset to placeholder
             self.current_category = None
             
             # Clear area selection
@@ -1429,6 +2850,9 @@ class BatchProcessingWindow(QMainWindow):
             
             # Reset date to today
             self.date_edit.setDate(QDate.currentDate())
+            
+            # Clear E-Way Bill Number
+            self.eway_bill_edit.clear()
             
             # Clear invoice number fields (handled in customer details now)
             
@@ -1456,30 +2880,7 @@ def main():
     palette.setColor(QPalette.ColorRole.WindowText, QColor(33, 37, 41))
     app.setPalette(palette)
     
-    # Check license before showing main window
-    from license_manager import LicenseManager
-    license_manager = LicenseManager()
-    is_valid, message = license_manager.is_license_valid()
-    
-    if not is_valid:
-        # Show activation dialog
-        hardware_id = license_manager.get_hardware_id()
-        activation_dialog = LicenseActivationDialog(hardware_id)
-        activation_dialog.setModal(True)
-        activation_dialog.raise_()
-        activation_dialog.activateWindow()
-        
-        if activation_dialog.exec() != DIALOG_ACCEPTED:
-            # User didn't activate, exit
-            sys.exit(0)
-        
-        # Re-check license after activation
-        is_valid, message = license_manager.is_license_valid()
-        if not is_valid:
-            QMessageBox.critical(None, "License Error", 
-                                f"License activation failed.\n\n{message}")
-            sys.exit(1)
-    
+    # Show main window directly (no license check)
     window = BatchProcessingWindow()
     window.show()
     sys.exit(app.exec())
