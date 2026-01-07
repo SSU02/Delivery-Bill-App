@@ -116,6 +116,8 @@ class AddAreaDialog(ModernDialog):
         name_layout.addWidget(QLabel("Area Name:"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Enter area name")
+        # Convert to uppercase as user types
+        self.name_edit.textChanged.connect(lambda text: self.name_edit.setText(text.upper()))
         name_layout.addWidget(self.name_edit)
         self.layout.addLayout(name_layout)
         

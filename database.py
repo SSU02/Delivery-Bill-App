@@ -31,35 +31,13 @@ class Database:
                 rc_no TEXT,
                 state TEXT,
                 gstin TEXT,
-                blaster_name TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
-        # Add blaster_name column if it doesn't exist (for existing databases)
-        try:
-            cursor.execute("ALTER TABLE customers ADD COLUMN blaster_name TEXT")
-        except sqlite3.OperationalError:
-            # Column already exists, ignore
-            pass
-        
         # Add location_id column if it doesn't exist (for existing databases)
         try:
             cursor.execute("ALTER TABLE customers ADD COLUMN location_id INTEGER")
-        except sqlite3.OperationalError:
-            # Column already exists, ignore
-            pass
-        
-        # Add blaster_document_no column if it doesn't exist (for existing databases)
-        try:
-            cursor.execute("ALTER TABLE customers ADD COLUMN blaster_document_no TEXT")
-        except sqlite3.OperationalError:
-            # Column already exists, ignore
-            pass
-        
-        # Add blaster_address column if it doesn't exist (for existing databases)
-        try:
-            cursor.execute("ALTER TABLE customers ADD COLUMN blaster_address TEXT")
         except sqlite3.OperationalError:
             # Column already exists, ignore
             pass
@@ -182,12 +160,12 @@ class Database:
             ('sgst_rate', '9.0')
         """)
         
-        # Migrate blaster data from customers table to blasters table
+        # Migrate blaster data from customers table to blasters table (if old columns exist)
         try:
             cursor.execute("PRAGMA table_info(customers)")
             customer_columns = [row[1] for row in cursor.fetchall()]
             
-            # Check if customers table has old blaster columns
+            # Check if customers table has old blaster columns and migrate if needed
             if 'blaster_name' in customer_columns and 'blaster_id' not in customer_columns:
                 # Migrate existing blaster data
                 cursor.execute("""
@@ -227,6 +205,45 @@ class Database:
             # Migration failed, but continue
             pass
         
+        # Remove old blaster columns from customers table if they exist
+        try:
+            cursor.execute("PRAGMA table_info(customers)")
+            customer_columns = [row[1] for row in cursor.fetchall()]
+            
+            # SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
+            if any(col in customer_columns for col in ['blaster_name', 'blaster_document_no', 'blaster_address']):
+                # Create new table without the old blaster columns
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS customers_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        address TEXT,
+                        sf_no TEXT,
+                        rc_no TEXT,
+                        state TEXT,
+                        gstin TEXT,
+                        blaster_id INTEGER,
+                        location_id INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Copy data from old table to new table (excluding old blaster columns)
+                cursor.execute("""
+                    INSERT INTO customers_new (id, name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at)
+                    SELECT id, name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at
+                    FROM customers
+                """)
+                
+                # Drop old table and rename new one
+                cursor.execute("DROP TABLE customers")
+                cursor.execute("ALTER TABLE customers_new RENAME TO customers")
+                conn.commit()
+        except Exception as e:
+            # Migration failed, but continue
+            conn.rollback()
+            pass
+        
         # Add blaster_id column if it doesn't exist (for new databases)
         try:
             cursor.execute("ALTER TABLE customers ADD COLUMN blaster_id INTEGER")
@@ -239,6 +256,9 @@ class Database:
         
         # Migrate existing customer data to uppercase
         self.migrate_customers_to_uppercase()
+        
+        # Migrate existing location data to uppercase
+        self.migrate_locations_to_uppercase()
         
         # Clean up orphaned blaster references
         self.cleanup_orphaned_blaster_references()
@@ -267,6 +287,34 @@ class Database:
                     SET name = ?, address = ?, sf_no = ?, rc_no = ?, state = ?, gstin = ?
                     WHERE id = ?
                 """, (name, address, sf_no, rc_no, state, gstin, customer_id))
+            
+            conn.commit()
+        except Exception as e:
+            # Migration failed, but continue
+            conn.rollback()
+            pass
+        finally:
+            conn.close()
+    
+    def migrate_locations_to_uppercase(self):
+        """Migrate all existing location data to uppercase"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Get all locations
+            cursor.execute("SELECT id, name FROM locations")
+            locations = cursor.fetchall()
+            
+            # Update each location to uppercase
+            for location in locations:
+                location_id = location[0]
+                name = location[1].upper() if location[1] else ""
+                
+                cursor.execute("""
+                    UPDATE locations 
+                    SET name = ?
+                    WHERE id = ?
+                """, (name, location_id))
             
             conn.commit()
         except Exception as e:
@@ -398,7 +446,10 @@ class Database:
     
     # Location operations (common to both Detonator and Explosives)
     def add_location(self, name: str) -> int:
-        """Add a new location (common to both categories)"""
+        """Add a new location (common to both categories) - convert name to uppercase"""
+        # Convert name to uppercase
+        name = name.upper() if name else ""
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -424,7 +475,10 @@ class Database:
         return locations
     
     def update_location(self, location_id: int, name: str):
-        """Update location name"""
+        """Update location name - convert name to uppercase"""
+        # Convert name to uppercase
+        name = name.upper() if name else ""
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         try:

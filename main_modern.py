@@ -2397,9 +2397,11 @@ class BatchProcessingWindow(QMainWindow):
             return False
         
         def edit_fn(area):
-            new_name, ok = QInputDialog.getText(self, "Rename Area", "Area name:", text=area.get('name', ''))
+            current_name = area.get('name', '').upper()
+            new_name, ok = QInputDialog.getText(self, "Rename Area", "Area name:", text=current_name)
             if ok and new_name.strip():
                 try:
+                    # update_location will convert to uppercase automatically
                     self.db.update_location(area['id'], new_name.strip())
                     self.refresh_areas()
                     return True
