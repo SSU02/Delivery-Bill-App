@@ -34,9 +34,6 @@ def build_exe():
         # Collect all reportlab data files
         '--collect-all=reportlab',
         
-        # Include database file (will be created if doesn't exist, but include template)
-        # Note: Database will be created at runtime if not present
-        
         # Include license manager
         '--hidden-import=license_manager',
         
@@ -47,12 +44,33 @@ def build_exe():
         '--hidden-import=database',
         '--hidden-import=pdf_generator',
         '--hidden-import=number_to_words',
+        '--hidden-import=goods_manager_modern',
+        '--hidden-import=modern_calendar',
     ]
     
-    # Add icon if it exists
+    # Include image resources
+    calendar_image = os.path.join(script_dir, 'calendar_4371058.png')
+    if os.path.exists(calendar_image):
+        args.append(f'--add-data={calendar_image};.')
+        print(f"Including calendar image: {calendar_image}")
+    
+    logo_image = os.path.join(script_dir, 'logo.png')
+    if os.path.exists(logo_image):
+        args.append(f'--add-data={logo_image};.')
+        print(f"Including logo image: {logo_image}")
+    
+    # Add icon - use logo.png as app icon
     icon_path = os.path.join(script_dir, 'icon.ico')
+    logo_path = os.path.join(script_dir, 'logo.png')
+    
     if os.path.exists(icon_path):
         args.append(f'--icon={icon_path}')
+        print(f"Using icon: {icon_path}")
+    elif os.path.exists(logo_path):
+        args.append(f'--icon={logo_path}')
+        print(f"Using logo as icon: {logo_path}")
+    else:
+        print("Note: No icon file found. App will use default Windows icon.")
     
     print("="*60)
     print("Building Delivery Bill App Executable")

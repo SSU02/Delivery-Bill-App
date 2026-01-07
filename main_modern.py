@@ -298,6 +298,9 @@ class BatchProcessingWindow(QMainWindow):
         # Create checkmark icon for checkboxes
         self.checkmark_icon_path = self._create_checkmark_icon()
         
+        # Set window icon (logo)
+        self._set_window_icon()
+        
         # State
         self.current_category = None
         self.current_area_id = None
@@ -347,6 +350,21 @@ class BatchProcessingWindow(QMainWindow):
         pixmap.save(icon_path)
         
         return icon_path
+    
+    def _set_window_icon(self):
+        """Set the window icon from logo.png"""
+        # Handle PyInstaller bundled mode
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable
+            script_dir = sys._MEIPASS
+        else:
+            # Running as script
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        logo_path = os.path.join(script_dir, "logo.png")
+        if os.path.exists(logo_path):
+            icon = QIcon(logo_path)
+            self.setWindowIcon(icon)
     
     def init_ui(self):
         """Initialize the user interface"""
@@ -677,7 +695,13 @@ class BatchProcessingWindow(QMainWindow):
         
         import os
         # Get the directory where this script is located
-        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Handle PyInstaller bundled mode
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable
+            script_dir = sys._MEIPASS
+        else:
+            # Running as script
+            script_dir = os.path.dirname(os.path.abspath(__file__))
         calendar_icon_path = os.path.join(script_dir, "calendar_4371058.png")
         
         # Load the calendar icon image
@@ -2875,6 +2899,20 @@ class BatchProcessingWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')  # Modern style
+    
+    # Set application icon (for taskbar)
+    import os
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        script_dir = sys._MEIPASS
+    else:
+        # Running as script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    logo_path = os.path.join(script_dir, "logo.png")
+    if os.path.exists(logo_path):
+        app_icon = QIcon(logo_path)
+        app.setWindowIcon(app_icon)
     
     # Set application palette for professional look
     palette = QPalette()
