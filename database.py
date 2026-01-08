@@ -124,6 +124,15 @@ class Database:
             # Migration failed, but that's okay - table might already be updated
             pass
         
+        # Units table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # Goods table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS goods (
@@ -260,6 +269,9 @@ class Database:
         # Migrate existing location data to uppercase
         self.migrate_locations_to_uppercase()
         
+        # Migrate existing units data to uppercase
+        self.migrate_units_to_uppercase()
+        
         # Clean up orphaned blaster references
         self.cleanup_orphaned_blaster_references()
     
@@ -315,6 +327,34 @@ class Database:
                     SET name = ?
                     WHERE id = ?
                 """, (name, location_id))
+            
+            conn.commit()
+        except Exception as e:
+            # Migration failed, but continue
+            conn.rollback()
+            pass
+        finally:
+            conn.close()
+    
+    def migrate_units_to_uppercase(self):
+        """Migrate all existing unit data to uppercase"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Get all units
+            cursor.execute("SELECT id, name FROM units")
+            units = cursor.fetchall()
+            
+            # Update each unit to uppercase
+            for unit in units:
+                unit_id = unit[0]
+                name = unit[1].upper() if unit[1] else ""
+                
+                cursor.execute("""
+                    UPDATE units 
+                    SET name = ?
+                    WHERE id = ?
+                """, (name, unit_id))
             
             conn.commit()
         except Exception as e:
@@ -741,6 +781,107 @@ class Database:
         conn.close()
         # Renumber IDs after deletion
         self.renumber_vehicles()
+    
+    # Unit operations
+    def add_unit(self, name: str) -> int:
+        """Add a new unit - convert name to uppercase"""
+        # Convert name to uppercase
+        name = name.upper() if name else ""
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO units (name)
+                VALUES (?)
+            """, (name,))
+            conn.commit()
+            unit_id = cursor.lastrowid
+            conn.close()
+            return unit_id
+        except sqlite3.IntegrityError:
+            conn.close()
+            raise ValueError(f"Unit '{name}' already exists")
+    
+    def get_units(self) -> List[Dict]:
+        """Get all units"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM units ORDER BY name ASC")
+        units = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return units
+    
+    def update_unit(self, unit_id: int, name: str):
+        """Update unit name - convert name to uppercase"""
+        # Convert name to uppercase
+        name = name.upper() if name else ""
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                UPDATE units 
+                SET name = ?
+                WHERE id = ?
+            """, (name, unit_id))
+            conn.commit()
+            conn.close()
+        except sqlite3.IntegrityError:
+            conn.close()
+            raise ValueError(f"Unit '{name}' already exists")
+    
+    def delete_unit(self, unit_id: int):
+        """Delete a unit"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM units WHERE id = ?", (unit_id,))
+        conn.commit()
+        conn.close()
+        # Renumber IDs after deletion
+        self.renumber_units()
+    
+    def renumber_units(self):
+        """Renumber unit IDs to be sequential (1, 2, 3...) based on alphabetical order"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Get all units ordered alphabetically by name
+            cursor.execute("SELECT id, name, created_at FROM units ORDER BY name ASC")
+            units = cursor.fetchall()
+            
+            if not units:
+                conn.close()
+                return
+            
+            # Create temporary table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS units_temp (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Insert units in alphabetical order with new IDs (1, 2, 3, ...)
+            cursor.execute("DELETE FROM units_temp")
+            for new_id, (old_id, name, created_at) in enumerate(units, 1):
+                cursor.execute("""
+                    INSERT INTO units_temp (id, name, created_at)
+                    VALUES (?, ?, ?)
+                """, (new_id, name, created_at))
+            
+            # Drop old table and rename new one
+            cursor.execute("DROP TABLE units")
+            cursor.execute("ALTER TABLE units_temp RENAME TO units")
+            
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            pass
     
     # Blaster operations
     def add_blaster(self, name: str, document_no: str = "", address: str = "") -> int:

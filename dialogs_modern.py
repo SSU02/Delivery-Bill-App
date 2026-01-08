@@ -8,7 +8,7 @@ try:
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
         QPushButton, QComboBox, QMessageBox, QTextEdit, QDoubleSpinBox,
         QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-        QListWidget, QListWidgetItem
+        QListWidget, QListWidgetItem, QInputDialog
     )
     from PyQt5.QtCore import Qt, pyqtSignal, QEvent
     from PyQt5.QtGui import QFont, QWheelEvent
@@ -20,7 +20,7 @@ except ImportError:
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
         QPushButton, QComboBox, QMessageBox, QTextEdit, QDoubleSpinBox,
         QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-        QListWidget, QListWidgetItem
+        QListWidget, QListWidgetItem, QInputDialog
     )
     from PyQt6.QtCore import Qt, pyqtSignal, QEvent
     from PyQt6.QtGui import QFont, QWheelEvent
@@ -30,13 +30,27 @@ from database import Database
 
 
 class NoWheelComboBox(QComboBox):
-    """QComboBox that only responds to wheel events when focused/clicked"""
+    """QComboBox that only responds to wheel events when explicitly clicked/focused"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._wheel_enabled = False  # Only enable wheel when explicitly clicked
+    
+    def mousePressEvent(self, event):
+        """Enable wheel events when combo box is clicked"""
+        self._wheel_enabled = True
+        super().mousePressEvent(event)
+    
+    def focusOutEvent(self, event):
+        """Disable wheel events when focus is lost"""
+        self._wheel_enabled = False
+        super().focusOutEvent(event)
+    
     def wheelEvent(self, event: QWheelEvent):
-        # Only process wheel events if the combo box is focused
-        if self.hasFocus():
+        # Only process wheel events if the combo box was explicitly clicked/focused
+        if self._wheel_enabled and self.hasFocus():
             super().wheelEvent(event)
         else:
-            # Ignore wheel events when not focused
+            # Ignore wheel events when not explicitly focused
             event.ignore()
 
 
@@ -174,6 +188,8 @@ class AddVehicleDialog(ModernDialog):
         vehicle_layout.addWidget(QLabel("Vehicle Number:"))
         self.vehicle_edit = QLineEdit()
         self.vehicle_edit.setPlaceholderText("Enter vehicle number")
+        # Convert to uppercase as user types
+        self.vehicle_edit.textChanged.connect(lambda text: self.vehicle_edit.setText(text.upper()))
         vehicle_layout.addWidget(self.vehicle_edit)
         self.layout.addLayout(vehicle_layout)
         
@@ -190,7 +206,7 @@ class AddVehicleDialog(ModernDialog):
     
     def save(self):
         """Save the vehicle"""
-        vehicle_no = self.vehicle_edit.text().strip()
+        vehicle_no = self.vehicle_edit.text().strip().upper()
         if not vehicle_no:
             QMessageBox.warning(self, "Error", "Vehicle number cannot be empty")
             return
@@ -198,6 +214,64 @@ class AddVehicleDialog(ModernDialog):
         try:
             self.db.add_vehicle(vehicle_no)
             QMessageBox.information(self, "Success", "Vehicle added successfully")
+            self.accept()
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+
+class AddUnitDialog(ModernDialog):
+    """Dialog for adding a new unit"""
+    def __init__(self, parent=None, db=None):
+        super().__init__("Add Unit", parent)
+        self.db = db
+        
+        # Unit name
+        unit_layout = QHBoxLayout()
+        unit_layout.addWidget(QLabel("Unit Name:"))
+        self.unit_edit = QLineEdit()
+        self.unit_edit.setPlaceholderText("Enter unit name")
+        # Convert to uppercase as user types
+        self.unit_edit.textChanged.connect(lambda text: self.unit_edit.setText(text.upper()))
+        unit_layout.addWidget(self.unit_edit)
+        self.layout.addLayout(unit_layout)
+        
+        # Buttons
+        btn_save = QPushButton("Save")
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+        """)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
+        btn_save.clicked.connect(self.save)
+        btn_cancel.clicked.connect(self.reject)
+        self.add_button_row([btn_cancel, btn_save])
+        
+        self.unit_edit.setFocus()
+    
+    def save(self):
+        """Save the unit"""
+        name = self.unit_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Error", "Unit name cannot be empty")
+            return
+        
+        try:
+            self.db.add_unit(name)
+            QMessageBox.information(self, "Success", "Unit added successfully")
             self.accept()
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
@@ -239,17 +313,9 @@ class AddCustomerDialog(ModernDialog):
                 if area:
                     entry.setText(area['name'].upper() if area.get('name') else '')
             entry.setPlaceholderText(f"Enter {label.lower()}")
-            # Convert to uppercase when editing is finished
+            # Convert to uppercase as user types
             if key in ['name', 'address', 'sf_no', 'rc_no', 'state', 'gstin']:
-                def make_upper():
-                    current_text = entry.text()
-                    cursor_pos = entry.cursorPosition()
-                    upper_text = current_text.upper()
-                    if current_text != upper_text:
-                        entry.setText(upper_text)
-                        # Restore cursor position
-                        entry.setCursorPosition(min(cursor_pos, len(upper_text)))
-                entry.editingFinished.connect(make_upper)
+                entry.textChanged.connect(lambda text, e=entry: e.setText(text.upper()))
             self.entries[key] = entry
             row_layout.addWidget(entry)
             self.layout.addLayout(row_layout)
@@ -357,6 +423,8 @@ class AddBlasterDialog(ModernDialog):
         name_layout = QHBoxLayout()
         name_layout.addWidget(QLabel("Name *:"))
         self.name_edit = QLineEdit()
+        # Convert to uppercase as user types
+        self.name_edit.textChanged.connect(lambda text: self.name_edit.setText(text.upper()))
         name_layout.addWidget(self.name_edit)
         self.layout.addLayout(name_layout)
         
@@ -364,6 +432,8 @@ class AddBlasterDialog(ModernDialog):
         doc_layout = QHBoxLayout()
         doc_layout.addWidget(QLabel("Document No:"))
         self.doc_edit = QLineEdit()
+        # Convert to uppercase as user types
+        self.doc_edit.textChanged.connect(lambda text: self.doc_edit.setText(text.upper()))
         doc_layout.addWidget(self.doc_edit)
         self.layout.addLayout(doc_layout)
         
@@ -372,6 +442,18 @@ class AddBlasterDialog(ModernDialog):
         address_layout.addWidget(QLabel("Address:"))
         self.address_edit = QTextEdit()
         self.address_edit.setMaximumHeight(80)
+        # Convert to uppercase as user types
+        def make_address_upper():
+            current_text = self.address_edit.toPlainText()
+            cursor = self.address_edit.textCursor()
+            cursor_pos = cursor.position()
+            upper_text = current_text.upper()
+            if current_text != upper_text:
+                self.address_edit.setPlainText(upper_text)
+                # Restore cursor position
+                cursor.setPosition(min(cursor_pos, len(upper_text)))
+                self.address_edit.setTextCursor(cursor)
+        self.address_edit.textChanged.connect(make_address_upper)
         address_layout.addWidget(self.address_edit)
         self.layout.addLayout(address_layout)
         
@@ -725,6 +807,8 @@ class NewGoodDialog(ModernDialog):
         self.desc_edit = QLineEdit()
         self.desc_edit.setMinimumWidth(field_width)
         self.desc_edit.setMaximumWidth(field_width)
+        # Convert to uppercase as user types
+        self.desc_edit.textChanged.connect(lambda text: self.desc_edit.setText(text.upper()))
         desc_layout.addWidget(self.desc_edit)
         desc_layout.addStretch()
         self.layout.addLayout(desc_layout)
@@ -787,6 +871,8 @@ class NewGoodDialog(ModernDialog):
         self.hsn_edit = QLineEdit()
         self.hsn_edit.setMinimumWidth(field_width)
         self.hsn_edit.setMaximumWidth(field_width)
+        # Convert to uppercase as user types
+        self.hsn_edit.textChanged.connect(lambda text: self.hsn_edit.setText(text.upper()))
         hsn_layout.addWidget(self.hsn_edit)
         hsn_layout.addStretch()
         self.layout.addLayout(hsn_layout)
@@ -828,10 +914,10 @@ class NewGoodDialog(ModernDialog):
         unit_label.setMinimumWidth(100)
         unit_layout.addWidget(unit_label)
         self.unit_combo = NoWheelComboBox()
-        self.unit_combo.addItems(['NOS', 'KG'])
         self.unit_combo.setMinimumWidth(field_width)
         self.unit_combo.setMaximumWidth(field_width)
-        # Simplified Unit Style
+        self.unit_combo.setEditable(False)
+        # Style similar to area/vehicle combo
         self.unit_combo.setStyleSheet("""
             QComboBox {
                 padding: 8px;
@@ -843,14 +929,24 @@ class NewGoodDialog(ModernDialog):
                 border: 2px solid #007bff;
             }
             QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 20px; 
-                border-left: 1px solid #ced4da;
-                background-color: #f8f9fa;
+                border: none;
+                width: 0px;
+                background: transparent;
             }
-            /* DELETE the QComboBox::down-arrow block entirely */
+            QComboBox::down-arrow {
+                image: none;
+                border: none;
+            }
         """)
+        # Disable default popup, use custom one
+        self.unit_combo.setMaxVisibleItems(0)
+        if hasattr(self.unit_combo, 'view'):
+            self.unit_combo.view().setVisible(False)
+        # Create custom popup
+        self._create_unit_popup()
+        # Override showPopup to use custom popup
+        self.unit_combo.showPopup = self._show_unit_popup
+        self.refresh_units()
         unit_layout.addWidget(self.unit_combo)
         unit_layout.addStretch()
         self.layout.addLayout(unit_layout)
@@ -865,6 +961,307 @@ class NewGoodDialog(ModernDialog):
         self.add_button_row([btn_cancel, btn_save])
         
         self.desc_edit.setFocus()
+    
+    def _create_unit_popup(self):
+        """Create a custom popup for unit selection with add/manage buttons."""
+        if PYQT_VERSION == 6:
+            from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListView
+            from PyQt6.QtCore import Qt
+        else:
+            from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListView
+            from PyQt5.QtCore import Qt
+        
+        popup = QWidget()
+        if PYQT_VERSION == 6:
+            popup.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        else:
+            popup.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Scrollable list view
+        list_view = QListView()
+        list_view.setMinimumHeight(120)
+        list_view.setMaximumHeight(250)
+        list_view.setMinimumWidth(self.unit_combo.width())
+        list_view.setFocus()
+        list_view.clicked.connect(lambda index: self._handle_unit_selection(popup, index))
+        
+        # Add keyboard support
+        def list_key_press(event):
+            if PYQT_VERSION == 6:
+                if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+                    current_index = list_view.currentIndex()
+                    if current_index.isValid():
+                        self._handle_unit_selection(popup, current_index)
+                elif event.key() == Qt.Key.Key_Escape:
+                    popup.close()
+                else:
+                    QListView.keyPressEvent(list_view, event)
+            else:
+                if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                    current_index = list_view.currentIndex()
+                    if current_index.isValid():
+                        self._handle_unit_selection(popup, current_index)
+                elif event.key() == Qt.Key_Escape:
+                    popup.close()
+                else:
+                    QListView.keyPressEvent(list_view, event)
+        
+        list_view.keyPressEvent = list_key_press
+        layout.addWidget(list_view)
+        
+        # Fixed button row at bottom
+        button_row = QWidget()
+        button_row.setStyleSheet("background-color: transparent;")
+        button_layout = QHBoxLayout(button_row)
+        button_layout.setContentsMargins(5, 5, 5, 5)
+        button_layout.setSpacing(5)
+        
+        add_btn = QPushButton("+ Add")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+        """)
+        add_btn.clicked.connect(lambda: self._handle_unit_action(popup, self.add_new_unit))
+        
+        manage_btn = QPushButton("Manage")
+        manage_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+        """)
+        manage_btn.clicked.connect(lambda: self._handle_unit_action(popup, self.manage_units))
+        
+        button_layout.addWidget(add_btn)
+        button_layout.addWidget(manage_btn)
+        layout.addWidget(button_row)
+        
+        popup.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+            }
+            QListView {
+                background-color: white;
+                border: none;
+                padding: 4px;
+                outline: 0;
+            }
+            QListView::item {
+                padding: 8px 10px;
+                border-radius: 5px;
+                color: #212529;
+            }
+            QListView::item:hover {
+                background-color: #f5f6f8;
+            }
+            QListView::item:selected {
+                background-color: #eaf2ff;
+                color: #0d6efd;
+            }
+            QScrollBar:vertical {
+                background-color: #e9ecef;
+                width: 12px;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #adb5bd;
+                min-height: 30px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #6c757d;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+                border: none;
+                background: transparent;
+            }
+        """)
+        
+        self.unit_combo._custom_popup = popup
+        self.unit_combo._custom_list_view = list_view
+    
+    def _show_unit_popup(self):
+        """Show the custom popup for unit combo box."""
+        if not hasattr(self.unit_combo, '_custom_popup'):
+            return
+        
+        popup = self.unit_combo._custom_popup
+        list_view = self.unit_combo._custom_list_view
+        
+        # Create a model with all combo box items
+        if PYQT_VERSION == 6:
+            from PyQt6.QtGui import QStandardItemModel, QStandardItem
+            from PyQt6.QtCore import Qt
+        else:
+            from PyQt5.QtGui import QStandardItemModel, QStandardItem
+            from PyQt5.QtCore import Qt
+        
+        model = QStandardItemModel()
+        # Add all items from combo box
+        for i in range(self.unit_combo.count()):
+            item = QStandardItem(self.unit_combo.itemText(i))
+            model.appendRow(item)
+        
+        list_view.setModel(model)
+        
+        # Set current selection in list view to match combo box
+        current_index = self.unit_combo.currentIndex()
+        if current_index >= 0:
+            list_view.setCurrentIndex(model.index(current_index, 0))
+        
+        # Position popup below combo box
+        global_pos = self.unit_combo.mapToGlobal(self.unit_combo.rect().bottomLeft())
+        popup.move(global_pos)
+        popup.show()
+        popup.raise_()
+        popup.activateWindow()
+        list_view.setFocus()
+    
+    def _handle_unit_selection(self, popup, index):
+        """Handle selection from custom popup."""
+        self.unit_combo.setCurrentIndex(index.row())
+        popup.close()
+    
+    def _handle_unit_action(self, popup, callback):
+        """Handle action button click from popup."""
+        popup.close()
+        if callback:
+            callback()
+            # Refresh units after add/manage
+            self.refresh_units()
+    
+    def refresh_units(self):
+        """Refresh the unit combo box from database"""
+        self.unit_combo.clear()
+        self.unit_combo.addItem("--Select Unit--", None)
+        units = self.db.get_units()
+        for unit in units:
+            self.unit_combo.addItem(unit['name'])
+    
+    def add_new_unit(self):
+        """Add a new unit"""
+        dialog = AddUnitDialog(self, self.db)
+        result = dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
+        if result == DIALOG_ACCEPTED:
+            self.refresh_units()
+            # Select the newly added unit
+            units = self.db.get_units()
+            if units:
+                new_unit = units[-1]  # Last added
+                index = self.unit_combo.findText(new_unit['name'])
+                if index >= 0:
+                    self.unit_combo.setCurrentIndex(index)
+    
+    def manage_units(self):
+        """Manage units (add, rename, delete)"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Manage Units")
+        layout = QVBoxLayout(dialog)
+        list_widget = QListWidget()
+        layout.addWidget(list_widget)
+        
+        def refresh():
+            list_widget.clear()
+            for unit in self.db.get_units():
+                display = unit.get('name', '') or "(No name)"
+                list_item = QListWidgetItem(display)
+                if PYQT_VERSION == 6:
+                    list_item.setData(Qt.ItemDataRole.UserRole, unit)
+                else:
+                    list_item.setData(Qt.UserRole, unit)
+                list_widget.addItem(list_item)
+        refresh()
+        
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton("Add")
+        btn_add.setStyleSheet("background-color: #28a745; color: white;")
+        btn_edit = QPushButton("Edit")
+        btn_edit.setStyleSheet("background-color: #007bff; color: white;")
+        btn_delete = QPushButton("Delete")
+        btn_delete.setStyleSheet("background-color: #dc3545; color: white;")
+        btn_close = QPushButton("Close")
+        btn_close.setStyleSheet("background-color: #6c757d; color: white;")
+        btn_row.addWidget(btn_add)
+        btn_row.addWidget(btn_edit)
+        btn_row.addWidget(btn_delete)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+        
+        def current_item():
+            item = list_widget.currentItem()
+            if not item:
+                QMessageBox.warning(dialog, "Select Item", "Please select an entry first.")
+                return None
+            if PYQT_VERSION == 6:
+                return item.data(Qt.ItemDataRole.UserRole)
+            else:
+                return item.data(Qt.UserRole)
+        
+        def add_action():
+            unit_dialog = AddUnitDialog(dialog, self.db)
+            result = unit_dialog.exec_() if PYQT_VERSION == 5 else unit_dialog.exec()
+            if result == DIALOG_ACCEPTED:
+                refresh()
+                self.refresh_units()
+        
+        def edit_action():
+            data = current_item()
+            if not data:
+                return
+            current_name = data.get('name', '').upper()
+            new_name, ok = QInputDialog.getText(dialog, "Rename Unit", "Unit name:", text=current_name)
+            if ok and new_name.strip():
+                try:
+                    self.db.update_unit(data['id'], new_name.strip())
+                    refresh()
+                    self.refresh_units()
+                except Exception as e:
+                    QMessageBox.warning(dialog, "Error", str(e))
+        
+        def delete_action():
+            data = current_item()
+            if not data:
+                return
+            reply = QMessageBox.question(
+                dialog, "Delete Unit",
+                f"Delete unit '{data.get('name', '')}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    self.db.delete_unit(data['id'])
+                    refresh()
+                    self.refresh_units()
+                except Exception as e:
+                    QMessageBox.warning(dialog, "Error", str(e))
+        
+        btn_add.clicked.connect(add_action)
+        btn_edit.clicked.connect(edit_action)
+        btn_delete.clicked.connect(delete_action)
+        btn_close.clicked.connect(dialog.close)
+        
+        dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
     
     def save(self):
         """Save the good"""
@@ -884,6 +1281,10 @@ class NewGoodDialog(ModernDialog):
         
         if not category:
             QMessageBox.warning(self, "Error", "Please select a Category")
+            return
+        
+        if not unit:
+            QMessageBox.warning(self, "Error", "Please select a Unit")
             return
         
         try:

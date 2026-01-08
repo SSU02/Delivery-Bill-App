@@ -12,9 +12,9 @@ try:
     QFrame, QGroupBox, QMessageBox, QDialog, QTextEdit, QSpinBox,
     QDoubleSpinBox, QFileDialog, QSplitter, QListWidget, QListWidgetItem,
     QListView, QInputDialog, QAbstractItemView, QStackedWidget, QStyledItemDelegate,
-    QGraphicsDropShadowEffect
+    QGraphicsDropShadowEffect, QSizePolicy
     )
-    from PyQt5.QtCore import Qt, QDate, QSize, pyqtSignal, QEvent
+    from PyQt5.QtCore import Qt, QDate, QSize, pyqtSignal, QEvent, QSettings
     from PyQt5.QtGui import QFont, QIcon, QColor, QPalette, QPixmap, QPainter, QPen, QPainterPath, QWheelEvent
     PYQT_VERSION = 5
     DIALOG_ACCEPTED = QDialog.Accepted
@@ -27,9 +27,9 @@ except ImportError:
         QFrame, QGroupBox, QMessageBox, QDialog, QTextEdit, QSpinBox,
         QDoubleSpinBox, QFileDialog, QSplitter, QListWidget, QListWidgetItem,
     QListView, QInputDialog, QAbstractItemView, QStackedWidget, QStyledItemDelegate,
-    QGraphicsDropShadowEffect
+    QGraphicsDropShadowEffect, QSizePolicy
     )
-    from PyQt6.QtCore import Qt, QDate, QSize, pyqtSignal, QEvent
+    from PyQt6.QtCore import Qt, QDate, QSize, pyqtSignal, QEvent, QSettings
     from PyQt6.QtGui import QFont, QIcon, QColor, QPalette, QPixmap, QPainter, QPen, QPainterPath, QWheelEvent
     PYQT_VERSION = 6
     DIALOG_ACCEPTED = QDialog.DialogCode.Accepted
@@ -39,7 +39,8 @@ from pdf_generator import PDFGenerator
 from number_to_words import number_to_words
 from dialogs_modern import (
     AddAreaDialog, AddVehicleDialog, AddCustomerDialog,
-    AddGoodDialog, AddBlasterDialog, NewGoodDialog, SelectCustomerDialog
+    AddGoodDialog, AddBlasterDialog, NewGoodDialog, SelectCustomerDialog,
+    AddUnitDialog
 )
 from modern_calendar import DateEditWithModernCalendar
 import re
@@ -49,13 +50,27 @@ import os
 
 
 class NoWheelComboBox(QComboBox):
-    """QComboBox that only responds to wheel events when focused/clicked"""
+    """QComboBox that only responds to wheel events when explicitly clicked/focused"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._wheel_enabled = False  # Only enable wheel when explicitly clicked
+    
+    def mousePressEvent(self, event):
+        """Enable wheel events when combo box is clicked"""
+        self._wheel_enabled = True
+        super().mousePressEvent(event)
+    
+    def focusOutEvent(self, event):
+        """Disable wheel events when focus is lost"""
+        self._wheel_enabled = False
+        super().focusOutEvent(event)
+    
     def wheelEvent(self, event: QWheelEvent):
-        # Only process wheel events if the combo box is focused
-        if self.hasFocus():
+        # Only process wheel events if the combo box was explicitly clicked/focused
+        if self._wheel_enabled and self.hasFocus():
             super().wheelEvent(event)
         else:
-            # Ignore wheel events when not focused
+            # Ignore wheel events when not explicitly focused
             event.ignore()
 
 
@@ -294,6 +309,9 @@ class BatchProcessingWindow(QMainWindow):
         super().__init__()
         self.db = Database()
         self.pdf_gen = PDFGenerator()
+        
+        # Initialize QSettings for remembering last save location
+        self.settings = QSettings("DeliveryBillApp", "DeliveryBillGenerator")
         
         # Create checkmark icon for checkboxes
         self.checkmark_icon_path = self._create_checkmark_icon()
@@ -1765,9 +1783,14 @@ class BatchProcessingWindow(QMainWindow):
             invoice_edit = QLineEdit(customer_data.get('invoice_no', ''))
             invoice_edit.setPlaceholderText("Enter invoice number (required)")
             invoice_edit.setMaximumWidth(400)
-            invoice_edit.textChanged.connect(
-                lambda text: self.update_customer_invoice_no(customer_id, text)
-            )
+            # Convert to uppercase as user types and update
+            def update_invoice(text):
+                upper_text = text.upper()
+                if text != upper_text:
+                    invoice_edit.setText(upper_text)
+                else:
+                    self.update_customer_invoice_no(customer_id, upper_text)
+            invoice_edit.textChanged.connect(update_invoice)
             invoice_layout.addRow(invoice_label, invoice_edit)
             
             # E-Way Doc No
@@ -1777,9 +1800,14 @@ class BatchProcessingWindow(QMainWindow):
             eway_edit = QLineEdit(customer_data.get('e_way_doc_no', ''))
             eway_edit.setPlaceholderText("Enter E-Way document number")
             eway_edit.setMaximumWidth(400)
-            eway_edit.textChanged.connect(
-                lambda text: self.update_customer_eway_doc(customer_id, text)
-            )
+            # Convert to uppercase as user types and update
+            def update_eway(text):
+                upper_text = text.upper()
+                if text != upper_text:
+                    eway_edit.setText(upper_text)
+                else:
+                    self.update_customer_eway_doc(customer_id, upper_text)
+            eway_edit.textChanged.connect(update_eway)
             invoice_layout.addRow(eway_label, eway_edit)
             
             # Place of Supply (Editable)
@@ -1789,9 +1817,14 @@ class BatchProcessingWindow(QMainWindow):
             place_edit = QLineEdit(customer_data.get('place_of_supply', customer.get('address', '') or self.current_area_name or ''))
             place_edit.setPlaceholderText("Enter place of supply")
             place_edit.setMaximumWidth(400)
-            place_edit.textChanged.connect(
-                lambda text: self.update_customer_place_of_supply(customer_id, text)
-            )
+            # Convert to uppercase as user types and update
+            def update_place(text):
+                upper_text = text.upper()
+                if text != upper_text:
+                    place_edit.setText(upper_text)
+                else:
+                    self.update_customer_place_of_supply(customer_id, upper_text)
+            place_edit.textChanged.connect(update_place)
             invoice_layout.addRow(place_label, place_edit)
             
             # GSTIN/Unique ID (Editable) - starts empty
@@ -1801,9 +1834,14 @@ class BatchProcessingWindow(QMainWindow):
             gstin_edit = QLineEdit(customer_data.get('gstin_unique_id', ''))
             gstin_edit.setPlaceholderText("Enter GSTIN/Unique ID (optional)")
             gstin_edit.setMaximumWidth(400)
-            gstin_edit.textChanged.connect(
-                lambda text: self.update_customer_gstin_unique_id(customer_id, text)
-            )
+            # Convert to uppercase as user types and update
+            def update_gstin(text):
+                upper_text = text.upper()
+                if text != upper_text:
+                    gstin_edit.setText(upper_text)
+                else:
+                    self.update_customer_gstin_unique_id(customer_id, upper_text)
+            gstin_edit.textChanged.connect(update_gstin)
             invoice_layout.addRow(gstin_label, gstin_edit)
             
             invoice_group.setLayout(invoice_layout)
@@ -1928,9 +1966,14 @@ class BatchProcessingWindow(QMainWindow):
             blaster_doc_edit = QLineEdit(blaster_doc_value)
             blaster_doc_edit.setPlaceholderText("Enter document number")
             blaster_doc_edit.setMaximumWidth(400)
-            blaster_doc_edit.textChanged.connect(
-                lambda text: self.update_customer_blaster_doc(customer_id, text)
-            )
+            # Convert to uppercase as user types and update
+            def update_blaster_doc(text):
+                upper_text = text.upper()
+                if text != upper_text:
+                    blaster_doc_edit.setText(upper_text)
+                else:
+                    self.update_customer_blaster_doc(customer_id, upper_text)
+            blaster_doc_edit.textChanged.connect(update_blaster_doc)
             blaster_layout.addRow(blaster_doc_label, blaster_doc_edit)
             
             # Blaster Address (Editable)
@@ -1940,9 +1983,14 @@ class BatchProcessingWindow(QMainWindow):
             blaster_addr_edit = QLineEdit(blaster_addr_value)
             blaster_addr_edit.setPlaceholderText("Enter blaster address")
             blaster_addr_edit.setMaximumWidth(400)
-            blaster_addr_edit.textChanged.connect(
-                lambda text: self.update_customer_blaster_address(customer_id, text)
-            )
+            # Convert to uppercase as user types and update
+            def update_blaster_addr(text):
+                upper_text = text.upper()
+                if text != upper_text:
+                    blaster_addr_edit.setText(upper_text)
+                else:
+                    self.update_customer_blaster_address(customer_id, upper_text)
+            blaster_addr_edit.textChanged.connect(update_blaster_addr)
             blaster_layout.addRow(blaster_addr_label, blaster_addr_edit)
             
             # Connect signal after fields are created to avoid errors
@@ -2046,25 +2094,33 @@ class BatchProcessingWindow(QMainWindow):
             
             items_table.setAlternatingRowColors(False)
             
-            # Disable scrollbars and set size policy
+            # Enable scrollbars inside the table widget
             try:
-                items_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                items_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
                 items_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
                 items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
                 items_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
                 items_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
             except AttributeError:
-                items_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                items_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
                 items_table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
                 items_table.setSelectionBehavior(QTableWidget.SelectRows)
                 items_table.setSelectionMode(QTableWidget.SingleSelection)
                 items_table.setEditTriggers(QTableWidget.NoEditTriggers)
             
-            # Calculate exact width: column widths + frame width + left viewport margin
-            total_width = 220 + 90 + 60 + 90 + 90 + 120 + items_table.frameWidth() * 2 + 5
-            items_table.setFixedWidth(total_width)
+            # Prevent columns from auto-stretching so horizontal scrollbar appears when needed
+            try:
+                items_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+            except AttributeError:
+                items_table.horizontalHeader().setResizeMode(QHeaderView.Fixed)
             
-            items_layout.addWidget(items_table, 0, Qt.AlignmentFlag.AlignLeft)
+            # Set size policy to expand horizontally to match button width
+            try:
+                items_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            except AttributeError:
+                items_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            
+            items_layout.addWidget(items_table)
             items_group.setLayout(items_layout)
             self.details_layout.addWidget(items_group)
             
@@ -2271,7 +2327,7 @@ class BatchProcessingWindow(QMainWindow):
             action_widget.setStyleSheet("background-color: transparent;")
             action_layout = QHBoxLayout(action_widget)
             action_layout.setContentsMargins(1, 0, 1, 0)
-            action_layout.setSpacing(2)
+            action_layout.setSpacing(5)
             
             # Edit button
             edit_btn = QPushButton("Edit")
@@ -2343,8 +2399,18 @@ class BatchProcessingWindow(QMainWindow):
         if customer_id in self.selected_customers:
             items = self.selected_customers[customer_id]['items']
             if 0 <= row < len(items):
-                items.pop(row)
-                self.refresh_customer_items(customer_id)
+                item = items[row]
+                # Show confirmation dialog
+                item_description = item.get('description', 'this item')
+                reply = QMessageBox.question(
+                    self, "Confirm Delete",
+                    f"Are you sure you want to delete '{item_description}' from this customer?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    items.pop(row)
+                    self.refresh_customer_items(customer_id)
     
     def edit_customer_item(self, customer_id, row):
         """Edit an existing item for a customer (change quantity, recalc totals)"""
@@ -2488,7 +2554,8 @@ class BatchProcessingWindow(QMainWindow):
             new_no, ok = QInputDialog.getText(self, "Rename Vehicle", "Vehicle number:", text=vehicle.get('vehicle_number', ''))
             if ok and new_no.strip():
                 try:
-                    self.db.update_vehicle(vehicle['id'], new_no.strip())
+                    # Convert to uppercase
+                    self.db.update_vehicle(vehicle['id'], new_no.strip().upper())
                     self.refresh_vehicles()
                     return True
                 except Exception as e:
@@ -2514,6 +2581,49 @@ class BatchProcessingWindow(QMainWindow):
             edit_fn,
             delete_fn,
             "vehicle_number"
+        )
+    
+    def manage_units(self):
+        """Manage units (add, rename, delete)"""
+        def add_fn():
+            dialog = AddUnitDialog(self, self.db)
+            result = dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
+            if result == DIALOG_ACCEPTED:
+                return True
+            return False
+        
+        def edit_fn(unit):
+            current_name = unit.get('name', '').upper()
+            new_name, ok = QInputDialog.getText(self, "Rename Unit", "Unit name:", text=current_name)
+            if ok and new_name.strip():
+                try:
+                    self.db.update_unit(unit['id'], new_name.strip())
+                    return True
+                except Exception as e:
+                    QMessageBox.warning(self, "Error", str(e))
+            return False
+        
+        def delete_fn(unit):
+            reply = QMessageBox.question(
+                self, "Delete Unit",
+                f"Delete unit '{unit.get('name', '')}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    self.db.delete_unit(unit['id'])
+                    return True
+                except Exception as e:
+                    QMessageBox.warning(self, "Error", str(e))
+            return False
+        
+        self._open_simple_manager(
+            "Manage Units",
+            self.db.get_units,
+            add_fn,
+            edit_fn,
+            delete_fn,
+            "name"
         )
     
     def on_vehicle_activated(self, index):
@@ -2649,6 +2759,8 @@ class BatchProcessingWindow(QMainWindow):
             name_row.addWidget(QLabel("Name *:"))
             name_edit = QLineEdit()
             name_edit.setText(blaster.get('name', ''))
+            # Convert to uppercase as user types
+            name_edit.textChanged.connect(lambda text: name_edit.setText(text.upper()))
             name_row.addWidget(name_edit)
             layout.addLayout(name_row)
             
@@ -2656,6 +2768,8 @@ class BatchProcessingWindow(QMainWindow):
             doc_row.addWidget(QLabel("Document No:"))
             doc_edit = QLineEdit()
             doc_edit.setText(blaster.get('document_no', ''))
+            # Convert to uppercase as user types
+            doc_edit.textChanged.connect(lambda text: doc_edit.setText(text.upper()))
             doc_row.addWidget(doc_edit)
             layout.addLayout(doc_row)
             
@@ -2663,7 +2777,19 @@ class BatchProcessingWindow(QMainWindow):
             address_row.addWidget(QLabel("Address:"))
             address_edit = QTextEdit()
             address_edit.setMaximumHeight(80)
-            address_edit.setText(blaster.get('address', ''))
+            address_edit.setPlainText(blaster.get('address', ''))
+            # Convert to uppercase as user types
+            def make_address_upper():
+                current_text = address_edit.toPlainText()
+                cursor = address_edit.textCursor()
+                cursor_pos = cursor.position()
+                upper_text = current_text.upper()
+                if current_text != upper_text:
+                    address_edit.setPlainText(upper_text)
+                    # Restore cursor position
+                    cursor.setPosition(min(cursor_pos, len(upper_text)))
+                    address_edit.setTextCursor(cursor)
+            address_edit.textChanged.connect(make_address_upper)
             address_row.addWidget(address_edit)
             layout.addLayout(address_row)
             
@@ -2766,15 +2892,46 @@ class BatchProcessingWindow(QMainWindow):
         e_way_bill_no = self.eway_bill_edit.text().strip()  # Get from configuration input
         
         # Ask for save file path (single PDF file)
-        default_filename = f"Delivery_Bills_{date_of_supply.replace('-', '_')}.pdf"
+        # Format: <First 3 chars of category>_<First 3 chars of area>_<date>.pdf
+        category_prefix = ""
+        if self.current_category:
+            category_str = str(self.current_category).upper()
+            category_prefix = category_str[:3] if len(category_str) >= 3 else category_str.ljust(3, 'X')
+        else:
+            category_prefix = "XXX"
+        
+        area_prefix = ""
+        if self.current_area_name:
+            area_str = str(self.current_area_name).upper()
+            area_prefix = area_str[:3] if len(area_str) >= 3 else area_str.ljust(3, 'X')
+        else:
+            area_prefix = "XXX"
+        
+        date_str = date_of_supply.replace('-', '_')
+        default_filename = f"{category_prefix}_{area_prefix}_{date_str}.pdf"
+        
+        # Get last saved directory from settings
+        last_dir = self.settings.value("last_pdf_save_dir", "")
+        if last_dir and os.path.exists(last_dir):
+            # Use last directory + default filename
+            default_path = os.path.join(last_dir, default_filename)
+        else:
+            # Use just the filename (will open in default location)
+            default_path = default_filename
+        
         filepath, _ = QFileDialog.getSaveFileName(
             self, 
             "Save PDF File", 
-            default_filename,
+            default_path,
             "PDF Files (*.pdf)"
         )
         if not filepath:
             return
+        
+        # Save the directory for next time
+        save_dir = os.path.dirname(filepath)
+        if save_dir:
+            self.settings.setValue("last_pdf_save_dir", save_dir)
         
         # Prepare invoice data for all customers
         invoice_data_list = []
