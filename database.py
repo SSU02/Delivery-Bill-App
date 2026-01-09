@@ -3,18 +3,117 @@ Database module for managing customers, locations, vehicles, goods, and settings
 """
 import sqlite3
 import os
+import sys
 from typing import List, Dict, Optional, Tuple
 
+def get_database_path():
+    """Get the database path - prefer same folder as .exe, fallback to AppData"""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        # Get the directory where the .exe is located
+        if hasattr(sys, '_MEIPASS'):
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            # But we want the actual .exe location, not the temp folder
+            exe_path = sys.executable
+        else:
+            exe_path = sys.argv[0]
+        exe_dir = os.path.dirname(os.path.abspath(exe_path))
+        
+        # First, check if database exists in the same folder as .exe
+        # This allows users to copy .exe and .db together
+        db_path_exe = os.path.join(exe_dir, "delivery_bill.db")
+        
+        if os.path.exists(db_path_exe):
+            # Database exists next to .exe - use it (user can copy it)
+            # Check if it's writable
+            try:
+                # Try to open for writing to check permissions
+                test_file = open(db_path_exe, 'r+b')
+                test_file.close()
+                return db_path_exe
+            except (IOError, PermissionError):
+                # File exists but not writable - fallback to AppData
+                pass
+        
+        # If no database next to .exe, or it's not writable, use AppData
+        # This ensures the database is always writable
+        appdata_dir = os.path.join(os.environ.get('APPDATA', ''), 'DeliveryBillApp')
+        if not os.path.exists(appdata_dir):
+            try:
+                os.makedirs(appdata_dir, exist_ok=True)
+            except:
+                # Fallback to temp directory if AppData fails
+                import tempfile
+                appdata_dir = tempfile.gettempdir()
+        
+        db_path = os.path.join(appdata_dir, "delivery_bill.db")
+    else:
+        # Running as script - use same folder as script
+        exe_dir = os.path.dirname(os.path.abspath(__file__))
+        db_path = os.path.join(exe_dir, "delivery_bill.db")
+    
+    return db_path
+
 class Database:
-    def __init__(self, db_path: str = "delivery_bill.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            db_path = get_database_path()
         self.db_path = db_path
+        
+        # Ensure the directory exists and is writable
+        db_dir = os.path.dirname(os.path.abspath(self.db_path))
+        if db_dir and not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except Exception:
+                # If we can't create the directory, use a fallback location
+                import tempfile
+                temp_dir = tempfile.gettempdir()
+                self.db_path = os.path.join(temp_dir, "delivery_bill.db")
+        
         self.init_database()
     
     def get_connection(self):
-        """Get database connection"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """Get database connection with proper write permissions"""
+        try:
+            # Ensure the database file is writable
+            if os.path.exists(self.db_path):
+                # Remove read-only attribute if it exists
+                try:
+                    import stat
+                    file_stat = os.stat(self.db_path)
+                    if not (file_stat.st_mode & stat.S_IWRITE):
+                        os.chmod(self.db_path, stat.S_IWRITE | stat.S_IREAD)
+                except:
+                    pass  # If we can't change permissions, try anyway
+            
+            # Connect with check_same_thread=False for better compatibility
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            
+            # Enable write-ahead logging for better concurrency
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+            except:
+                pass  # If WAL fails, continue with default mode
+            
+            return conn
+        except sqlite3.OperationalError as e:
+            error_msg = str(e).lower()
+            # If there's a permission issue, try fallback location
+            if "unable to open database file" in error_msg or "readonly" in error_msg:
+                import tempfile
+                temp_dir = tempfile.gettempdir()
+                fallback_path = os.path.join(temp_dir, "delivery_bill.db")
+                if fallback_path != self.db_path:
+                    self.db_path = fallback_path
+                    # Ensure fallback directory exists
+                    try:
+                        os.makedirs(temp_dir, exist_ok=True)
+                    except:
+                        pass
+                    return self.get_connection()
+            raise
     
     def init_database(self):
         """Initialize database tables"""

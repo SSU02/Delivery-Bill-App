@@ -320,12 +320,58 @@ class AddCustomerDialog(ModernDialog):
             row_layout.addWidget(entry)
             self.layout.addLayout(row_layout)
         
-        # Blaster selection
+        # Blaster selection - styled like area/vehicle/category
         blaster_layout = QHBoxLayout()
-        blaster_layout.addWidget(QLabel("Blaster:"))
+        blaster_label = QLabel("Blaster:")
+        blaster_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529; min-width: 80px; padding: 2px 0px;")
+        blaster_label.setMinimumHeight(45)
+        if PYQT_VERSION == 6:
+            blaster_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        else:
+            blaster_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        blaster_layout.addWidget(blaster_label)
+        
         self.blaster_combo = NoWheelComboBox()
+        self.blaster_combo.setMinimumWidth(180)
+        self.blaster_combo.setMaximumWidth(180)
+        self.blaster_combo.setMinimumHeight(45)
+        self.blaster_combo.setEditable(False)
+        
+        # Apply the same dropdown style as category/area/vehicle
+        dropdown_field_style = """
+            QComboBox {
+                padding: 10px 12px;
+                border: 1.5px solid #d0d7de;
+                border-radius: 8px;
+                background-color: #ffffff;
+                font-size: 14px;
+                color: #212529;
+                text-align: center;
+            }
+            QComboBox:focus {
+                border: 1.5px solid #0d6efd;
+                background-color: #ffffff;
+            }
+            QComboBox::drop-down {
+                width: 0px;
+                border: none;
+                background: transparent;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                width: 0px;
+                height: 0px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: transparent;
+                border: none;
+            }
+        """
+        self.blaster_combo.setStyleSheet(dropdown_field_style)
+        
+        # Populate blasters
         blasters = db.get_blasters()
-        self.blaster_combo.addItem("", None)
+        self.blaster_combo.addItem("-- Select Blaster --", None)
         for blaster in blasters:
             self.blaster_combo.addItem(blaster['name'], blaster['id'])
         
@@ -334,11 +380,17 @@ class AddCustomerDialog(ModernDialog):
             if index >= 0:
                 self.blaster_combo.setCurrentIndex(index)
         
+        # Create custom popup with add/manage buttons
+        self._create_blaster_popup()
+        # Override showPopup to use custom popup
+        self.blaster_combo.showPopup = self._show_blaster_popup
+        # Disable default popup
+        self.blaster_combo.setMaxVisibleItems(0)
+        if hasattr(self.blaster_combo, 'view'):
+            self.blaster_combo.view().setVisible(False)
+        
         blaster_layout.addWidget(self.blaster_combo)
-        btn_add_blaster = QPushButton("+ Add Blaster")
-        btn_add_blaster.setStyleSheet("background-color: #28a745; color: white; padding: 5px 10px;")
-        btn_add_blaster.clicked.connect(self.add_blaster)
-        blaster_layout.addWidget(btn_add_blaster)
+        blaster_layout.addStretch()
         self.layout.addLayout(blaster_layout)
         
         # Buttons
@@ -352,17 +404,303 @@ class AddCustomerDialog(ModernDialog):
         
         self.entries['name'].setFocus()
     
+    def _create_blaster_popup(self):
+        """Create a custom popup for blaster selection with add/manage buttons."""
+        if PYQT_VERSION == 6:
+            from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListView, QPushButton
+            from PyQt6.QtCore import Qt
+        else:
+            from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListView, QPushButton
+            from PyQt5.QtCore import Qt
+        
+        popup = QWidget()
+        if PYQT_VERSION == 6:
+            popup.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        else:
+            popup.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Scrollable list view
+        list_view = QListView()
+        list_view.setMinimumHeight(120)
+        list_view.setMaximumHeight(250)
+        list_view.setMinimumWidth(self.blaster_combo.width())
+        list_view.setFocus()
+        list_view.clicked.connect(lambda index: self._handle_blaster_selection(popup, index))
+        
+        # Add keyboard support
+        def list_key_press(event):
+            if PYQT_VERSION == 6:
+                if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+                    current_index = list_view.currentIndex()
+                    if current_index.isValid():
+                        self._handle_blaster_selection(popup, current_index)
+                elif event.key() == Qt.Key.Key_Escape:
+                    popup.close()
+                else:
+                    QListView.keyPressEvent(list_view, event)
+            else:
+                if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                    current_index = list_view.currentIndex()
+                    if current_index.isValid():
+                        self._handle_blaster_selection(popup, current_index)
+                elif event.key() == Qt.Key_Escape:
+                    popup.close()
+                else:
+                    QListView.keyPressEvent(list_view, event)
+        
+        list_view.keyPressEvent = list_key_press
+        layout.addWidget(list_view)
+        
+        # Fixed button row at bottom
+        button_row = QWidget()
+        button_row.setStyleSheet("background-color: transparent;")
+        button_layout = QHBoxLayout(button_row)
+        button_layout.setContentsMargins(5, 5, 5, 5)
+        button_layout.setSpacing(5)
+        
+        add_btn = QPushButton("+ Add")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+        """)
+        add_btn.clicked.connect(lambda: self._handle_blaster_action(popup, self.add_blaster))
+        
+        manage_btn = QPushButton("Manage")
+        manage_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+        """)
+        manage_btn.clicked.connect(lambda: self._handle_blaster_action(popup, self.manage_blasters))
+        
+        button_layout.addWidget(add_btn)
+        button_layout.addWidget(manage_btn)
+        layout.addWidget(button_row)
+        
+        popup.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+            }
+            QListView {
+                background-color: white;
+                border: none;
+                padding: 4px;
+                outline: 0;
+            }
+            QListView::item {
+                padding: 8px 10px;
+                border-radius: 5px;
+                color: #212529;
+            }
+            QListView::item:hover {
+                background-color: #f5f6f8;
+            }
+            QListView::item:selected {
+                background-color: #eaf2ff;
+                color: #0d6efd;
+            }
+            QScrollBar:vertical {
+                background-color: #e9ecef;
+                width: 12px;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #adb5bd;
+                min-height: 30px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #6c757d;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+                border: none;
+                background: transparent;
+            }
+        """)
+        
+        self.blaster_combo._custom_popup = popup
+        self.blaster_combo._custom_list_view = list_view
+    
+    def _show_blaster_popup(self):
+        """Show the custom popup for blaster combo box."""
+        if not hasattr(self.blaster_combo, '_custom_popup'):
+            return
+        
+        popup = self.blaster_combo._custom_popup
+        list_view = self.blaster_combo._custom_list_view
+        
+        # Create a model with all combo box items
+        if PYQT_VERSION == 6:
+            from PyQt6.QtGui import QStandardItemModel, QStandardItem
+            from PyQt6.QtCore import Qt
+        else:
+            from PyQt5.QtGui import QStandardItemModel, QStandardItem
+            from PyQt5.QtCore import Qt
+        
+        model = QStandardItemModel()
+        # Add all items from combo box
+        for i in range(self.blaster_combo.count()):
+            item = QStandardItem(self.blaster_combo.itemText(i))
+            model.appendRow(item)
+        
+        list_view.setModel(model)
+        
+        # Set current selection in list view to match combo box
+        current_index = self.blaster_combo.currentIndex()
+        if current_index >= 0:
+            list_view.setCurrentIndex(model.index(current_index, 0))
+        
+        # Position popup below combo box
+        global_pos = self.blaster_combo.mapToGlobal(self.blaster_combo.rect().bottomLeft())
+        popup.move(global_pos)
+        popup.show()
+        popup.raise_()
+        popup.activateWindow()
+        list_view.setFocus()
+    
+    def _handle_blaster_selection(self, popup, index):
+        """Handle selection from custom popup."""
+        self.blaster_combo.setCurrentIndex(index.row())
+        popup.close()
+    
+    def _handle_blaster_action(self, popup, callback):
+        """Handle action button click from popup."""
+        popup.close()
+        if callback:
+            callback()
+            # Refresh blaster combo after add/manage
+            self.refresh_blaster_combo()
+    
+    def refresh_blaster_combo(self):
+        """Refresh the blaster combo box from database"""
+        current_id = self.blaster_combo.currentData()
+        self.blaster_combo.clear()
+        self.blaster_combo.addItem("-- Select Blaster --", None)
+        blasters = self.db.get_blasters()
+        for blaster in blasters:
+            self.blaster_combo.addItem(blaster['name'], blaster['id'])
+        
+        # Restore previous selection if it still exists
+        if current_id:
+            index = self.blaster_combo.findData(current_id)
+            if index >= 0:
+                self.blaster_combo.setCurrentIndex(index)
+    
     def add_blaster(self):
         """Add a new blaster"""
         dialog = AddBlasterDialog(self, self.db)
         result = dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
         if result == DIALOG_ACCEPTED:
-            # Refresh blaster combo
-            self.blaster_combo.clear()
-            self.blaster_combo.addItem("", None)
-            blasters = self.db.get_blasters()
-            for blaster in blasters:
-                self.blaster_combo.addItem(blaster['name'], blaster['id'])
+            self.refresh_blaster_combo()
+    
+    def manage_blasters(self):
+        """Manage blasters (add, edit, delete)"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Manage Blasters")
+        layout = QVBoxLayout(dialog)
+        list_widget = QListWidget()
+        layout.addWidget(list_widget)
+        
+        def refresh():
+            list_widget.clear()
+            for blaster in self.db.get_blasters():
+                display = blaster.get('name', '') or "(No name)"
+                list_item = QListWidgetItem(display)
+                if PYQT_VERSION == 6:
+                    list_item.setData(Qt.ItemDataRole.UserRole, blaster)
+                else:
+                    list_item.setData(Qt.UserRole, blaster)
+                list_widget.addItem(list_item)
+        refresh()
+        
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton("Add")
+        btn_add.setStyleSheet("background-color: #28a745; color: white;")
+        btn_edit = QPushButton("Edit")
+        btn_edit.setStyleSheet("background-color: #007bff; color: white;")
+        btn_delete = QPushButton("Delete")
+        btn_delete.setStyleSheet("background-color: #dc3545; color: white;")
+        btn_close = QPushButton("Close")
+        btn_close.setStyleSheet("background-color: #6c757d; color: white;")
+        btn_row.addWidget(btn_add)
+        btn_row.addWidget(btn_edit)
+        btn_row.addWidget(btn_delete)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+        
+        def current_item():
+            item = list_widget.currentItem()
+            if not item:
+                QMessageBox.warning(dialog, "Select Item", "Please select a blaster first.")
+                return None
+            if PYQT_VERSION == 6:
+                return item.data(Qt.ItemDataRole.UserRole)
+            else:
+                return item.data(Qt.UserRole)
+        
+        def add_action():
+            blaster_dialog = AddBlasterDialog(dialog, self.db)
+            result = blaster_dialog.exec_() if PYQT_VERSION == 5 else blaster_dialog.exec()
+            if result == DIALOG_ACCEPTED:
+                refresh()
+                self.refresh_blaster_combo()
+        
+        def edit_action():
+            data = current_item()
+            if not data:
+                return
+            # Create edit dialog (reuse AddBlasterDialog with existing data)
+            blaster_dialog = AddBlasterDialog(dialog, self.db, blaster=data)
+            result = blaster_dialog.exec_() if PYQT_VERSION == 5 else blaster_dialog.exec()
+            if result == DIALOG_ACCEPTED:
+                refresh()
+                self.refresh_blaster_combo()
+        
+        def delete_action():
+            data = current_item()
+            if not data:
+                return
+            reply = QMessageBox.question(
+                dialog, "Delete Blaster",
+                f"Delete blaster '{data.get('name', '')}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    self.db.delete_blaster(data['id'])
+                    refresh()
+                    self.refresh_blaster_combo()
+                except Exception as e:
+                    QMessageBox.warning(dialog, "Error", str(e))
+        
+        btn_add.clicked.connect(add_action)
+        btn_edit.clicked.connect(edit_action)
+        btn_delete.clicked.connect(delete_action)
+        btn_close.clicked.connect(dialog.close)
+        
+        dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
     
     def save(self):
         """Save the customer - convert all text fields to uppercase"""
@@ -414,15 +752,19 @@ class AddCustomerDialog(ModernDialog):
 
 
 class AddBlasterDialog(ModernDialog):
-    """Dialog for adding a blaster"""
-    def __init__(self, parent=None, db=None):
-        super().__init__("Add Blaster", parent)
+    """Dialog for adding/editing a blaster"""
+    def __init__(self, parent=None, db=None, blaster=None):
+        title = "Edit Blaster" if blaster else "Add Blaster"
+        super().__init__(title, parent)
         self.db = db
+        self.blaster = blaster
         
         # Name
         name_layout = QHBoxLayout()
         name_layout.addWidget(QLabel("Name *:"))
         self.name_edit = QLineEdit()
+        if blaster:
+            self.name_edit.setText(blaster.get('name', '').upper() if blaster.get('name') else '')
         # Convert to uppercase as user types
         self.name_edit.textChanged.connect(lambda text: self.name_edit.setText(text.upper()))
         name_layout.addWidget(self.name_edit)
@@ -432,6 +774,8 @@ class AddBlasterDialog(ModernDialog):
         doc_layout = QHBoxLayout()
         doc_layout.addWidget(QLabel("Document No:"))
         self.doc_edit = QLineEdit()
+        if blaster:
+            self.doc_edit.setText(blaster.get('document_no', '').upper() if blaster.get('document_no') else '')
         # Convert to uppercase as user types
         self.doc_edit.textChanged.connect(lambda text: self.doc_edit.setText(text.upper()))
         doc_layout.addWidget(self.doc_edit)
@@ -442,6 +786,8 @@ class AddBlasterDialog(ModernDialog):
         address_layout.addWidget(QLabel("Address:"))
         self.address_edit = QTextEdit()
         self.address_edit.setMaximumHeight(80)
+        if blaster:
+            self.address_edit.setPlainText(blaster.get('address', '').upper() if blaster.get('address') else '')
         # Convert to uppercase as user types
         def make_address_upper():
             current_text = self.address_edit.toPlainText()
@@ -470,21 +816,32 @@ class AddBlasterDialog(ModernDialog):
     
     def save(self):
         """Save the blaster"""
-        name = self.name_edit.text().strip()
+        name = self.name_edit.text().strip().upper()
         if not name:
             QMessageBox.warning(self, "Error", "Blaster name is required")
             return
         
         try:
-            self.db.add_blaster(
-                name,
-                self.doc_edit.text().strip(),
-                self.address_edit.toPlainText().strip()
-            )
-            QMessageBox.information(self, "Success", "Blaster added successfully")
+            if self.blaster:
+                # Update existing blaster
+                self.db.update_blaster(
+                    self.blaster['id'],
+                    name,
+                    self.doc_edit.text().strip().upper(),
+                    self.address_edit.toPlainText().strip().upper()
+                )
+                QMessageBox.information(self, "Success", "Blaster updated successfully")
+            else:
+                # Add new blaster
+                self.db.add_blaster(
+                    name,
+                    self.doc_edit.text().strip().upper(),
+                    self.address_edit.toPlainText().strip().upper()
+                )
+                QMessageBox.information(self, "Success", "Blaster added successfully")
             self.accept()
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to add blaster: {str(e)}")
+            QMessageBox.warning(self, "Error", f"Failed to save blaster: {str(e)}")
 
 
 class AddGoodDialog(ModernDialog):
