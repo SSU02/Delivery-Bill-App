@@ -289,6 +289,7 @@ class AddCustomerDialog(ModernDialog):
         # Fields
         fields = [
             ("Name *", "name"),
+            # Phone is handled as a custom row with fixed +91 prefix
             ("Address", "address"),
             ("SF.NO", "sf_no"),
             ("RC.NO", "rc_no"),
@@ -297,6 +298,8 @@ class AddCustomerDialog(ModernDialog):
         ]
         
         self.entries = {}
+        
+        # Name row (keep first for focus + required)
         for label, key in fields:
             row_layout = QHBoxLayout()
             row_layout.addWidget(QLabel(label))
@@ -319,6 +322,58 @@ class AddCustomerDialog(ModernDialog):
             self.entries[key] = entry
             row_layout.addWidget(entry)
             self.layout.addLayout(row_layout)
+            
+            # Insert Phone row right after Name row
+            if key == "name":
+                phone_row = QHBoxLayout()
+                phone_row.addWidget(QLabel("Phone"))
+                
+                prefix = QLabel("+91")
+                prefix.setFixedWidth(45)
+                prefix.setMinimumHeight(32)
+                prefix.setAlignment(Qt.AlignCenter if PYQT_VERSION == 5 else Qt.AlignmentFlag.AlignCenter)
+                prefix.setStyleSheet("""
+                    QLabel {
+                        border: 2px solid #ced4da;
+                        border-radius: 4px;
+                        padding: 6px 6px;
+                        background-color: #f8f9fa;
+                        font-size: 12px;
+                        font-weight: bold;
+                        color: #212529;
+                    }
+                """)
+                phone_row.addWidget(prefix)
+                
+                self.phone_edit = QLineEdit()
+                self.phone_edit.setPlaceholderText("10-digit mobile number")
+                self.phone_edit.setMaxLength(10)
+                self.phone_edit.setFixedWidth(200)
+                
+                # Prefill digits when editing (+91XXXXXXXXXX or plain 10 digits)
+                if customer:
+                    existing = (customer.get("phone") or "").strip()
+                    digits = "".join(ch for ch in existing if ch.isdigit())
+                    # If stored with country code, keep last 10 digits
+                    if len(digits) >= 10:
+                        digits = digits[-10:]
+                    self.phone_edit.setText(digits)
+                
+                def _enforce_digits(text):
+                    digits_only = "".join(ch for ch in text if ch.isdigit())
+                    if digits_only != text:
+                        self.phone_edit.blockSignals(True)
+                        self.phone_edit.setText(digits_only[:10])
+                        self.phone_edit.blockSignals(False)
+                    elif len(text) > 10:
+                        self.phone_edit.blockSignals(True)
+                        self.phone_edit.setText(text[:10])
+                        self.phone_edit.blockSignals(False)
+                
+                self.phone_edit.textChanged.connect(_enforce_digits)
+                phone_row.addWidget(self.phone_edit)
+                phone_row.addStretch()
+                self.layout.addLayout(phone_row)
         
         # Blaster selection - styled like area/vehicle/category
         blaster_layout = QHBoxLayout()
@@ -718,6 +773,12 @@ class AddCustomerDialog(ModernDialog):
         state = self.entries['state'].text().strip().upper()
         gstin = self.entries['gstin'].text().strip().upper()
         
+        phone_digits = (self.phone_edit.text().strip() if hasattr(self, "phone_edit") else "")
+        if phone_digits and len(phone_digits) != 10:
+            QMessageBox.warning(self, "Error", "Phone number must be exactly 10 digits")
+            return
+        phone_full = f"+91{phone_digits}" if phone_digits else ""
+        
         try:
             if self.customer:
                 # Update
@@ -729,6 +790,7 @@ class AddCustomerDialog(ModernDialog):
                     rc_no,
                     state,
                     gstin,
+                    phone_full,
                     blaster_id,
                     self.area_id
                 )
@@ -742,6 +804,7 @@ class AddCustomerDialog(ModernDialog):
                     rc_no,
                     state,
                     gstin,
+                    phone_full,
                     blaster_id,
                     self.area_id
                 )

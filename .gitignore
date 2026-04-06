@@ -42,3 +42,11 @@ Thumbs.db
 # PDFs (optional - remove if you want to track generated PDFs)
 *.pdf
 
+# Node / WhatsApp
+node_modules/
+.wwebjs_cache/
+whatsapp_session/
+whatsapp_log.txt
+whatsapp_node.log
+chrome_profile/
+

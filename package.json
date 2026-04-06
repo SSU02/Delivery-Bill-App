@@ -1,0 +1,13 @@
+{
+  "name": "deliverybillapp-whatsapp",
+  "version": "1.0.0",
+  "description": "WhatsApp Web server for DeliveryBillApp",
+  "main": "whatsapp_server.js",
+  "scripts": {
+    "start": "node whatsapp_server.js"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "^1.23.0",
+    "express": "^4.18.2"
+  }
+}
