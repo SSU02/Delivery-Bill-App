@@ -11,4 +11,7 @@ dependencies:
       - pypdf>=3.0.0
       - cryptography>=41.0.0
       - tkcalendar==1.6.1
+      - requests
+      - qrcode[pil]
+      - Pillow
       - pyinstaller  # Optional: for building executables

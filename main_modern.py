@@ -36,6 +36,7 @@ except ImportError:
 from datetime import datetime
 from database import Database
 from pdf_generator import PDFGenerator
+from whatsapp_dialog import WhatsAppDialog
 from number_to_words import number_to_words
 from dialogs_modern import (
     AddAreaDialog, AddVehicleDialog, AddCustomerDialog,
@@ -1032,10 +1033,14 @@ class BatchProcessingWindow(QMainWindow):
         action_layout = QHBoxLayout()
         action_layout.addStretch()
         btn_generate = ModernButton("Generate PDFs for Selected Customers", primary=True)
+        self.btn_whatsapp = ModernButton("Send via WhatsApp", primary=False)
+        self.btn_whatsapp.setEnabled(False)
         btn_clear = ModernButton("Clear Form", primary=False)
         btn_generate.clicked.connect(self.generate_pdfs)
+        self.btn_whatsapp.clicked.connect(self.open_whatsapp_dialog)
         btn_clear.clicked.connect(self.clear_form)
         action_layout.addWidget(btn_generate)
+        action_layout.addWidget(self.btn_whatsapp)
         action_layout.addWidget(btn_clear)
         main_layout.addLayout(action_layout)
         
@@ -1658,6 +1663,86 @@ class BatchProcessingWindow(QMainWindow):
             if self.expanded_customer_id == customer_id:
                 self.clear_customer_details()
                 self.expanded_customer_id = None
+        
+        # Enable WhatsApp button only when something is selected
+        if hasattr(self, "btn_whatsapp"):
+            self.btn_whatsapp.setEnabled(bool(self.selected_customers))
+
+    def open_whatsapp_dialog(self):
+        """Open WhatsApp sending dialog for selected customers."""
+        if not self.selected_customers:
+            QMessageBox.warning(self, "Select Customers", "Please select at least one customer first.")
+            return
+        
+        # Build bills list from the same invoice_data used for PDF generation
+        if not self.current_category:
+            QMessageBox.warning(self, "Category Required", "Please select a Category first.")
+            return
+        if not self.current_area_id:
+            QMessageBox.warning(self, "Warning", "Please select an area")
+            return
+        
+        # Validate invoice numbers are entered for all selected customers (same as PDF flow)
+        missing_invoices = []
+        for customer_id, customer_data in self.selected_customers.items():
+            invoice_no = customer_data.get('invoice_no', '').strip()
+            if not invoice_no:
+                customer_name = customer_data['customer'].get('name', 'Unknown')
+                missing_invoices.append(customer_name.upper() if customer_name else 'Unknown')
+        if missing_invoices:
+            QMessageBox.warning(self, "Warning",
+                "Invoice number is required for:\n" + "\n".join(missing_invoices))
+            return
+        
+        # Date of supply + vehicle (use current UI values if available)
+        try:
+            date_of_supply = self.date_edit.date().toString("dd-MM-yyyy")
+        except Exception:
+            date_of_supply = ""
+        vehicle_number = self.vehicle_combo.currentText() if hasattr(self, "vehicle_combo") else ""
+        e_way_bill_no = self.eway_bill_edit.text().strip() if hasattr(self, "eway_bill_edit") else ""
+        
+        bills = []
+        for customer_id, customer_data in self.selected_customers.items():
+            customer = customer_data.get('customer') or {}
+            items = customer_data.get('items', []) or []
+            total_items = sum(item.get('total_amount', 0) for item in items) if items else 0
+            freight = customer_data.get('freight_charges', 0) or 0
+            grand_total = total_items + freight
+            rounded_total = self._round_total(grand_total)
+            
+            blaster_data = customer_data.get('blaster_data', {}) or {}
+            blaster_name = blaster_data.get('blaster_name') or customer.get('blaster_name', '')
+            blaster_doc = blaster_data.get('blaster_document_no') or customer.get('blaster_document_no', '')
+            blaster_address = blaster_data.get('blaster_address') or customer.get('blaster_address', '')
+            
+            bills.append({
+                'invoice_number': customer_data.get('invoice_no', ''),
+                'date_of_supply': date_of_supply,
+                'category': self.current_category or '',
+                'location_name': self.current_area_name or '',
+                'vehicle_number': vehicle_number or '',
+                'customer': customer,
+                'mode_of_transport': 'Road',
+                'is_original': self.original_checkbox.isChecked() if hasattr(self, "original_checkbox") else False,
+                'is_duplicate': self.duplicate_checkbox.isChecked() if hasattr(self, "duplicate_checkbox") else False,
+                'is_triplicate': self.triplicate_checkbox.isChecked() if hasattr(self, "triplicate_checkbox") else False,
+                'e_way_bill_no': e_way_bill_no,
+                'e_way_document_no': customer_data.get('e_way_doc_no', ''),
+                'place_of_supply': customer_data.get('place_of_supply', '') or customer.get('address', ''),
+                'state_code': '33',
+                'gstin_unique_id': customer_data.get('gstin_unique_id', ''),
+                'items': items,
+                'freight_charges': float(freight) if freight else 0.0,
+                'grand_total': float(rounded_total),
+                'total_in_words': '',
+                'blaster_name': blaster_name or '',
+                'document_no': blaster_doc or '',
+                'blaster_address': blaster_address or ''
+            })
+        
+        dialog = WhatsAppDialog(self, bills=bills, default_company_name="Senthil Explosives")
+        dialog.exec_() if PYQT_VERSION == 5 else dialog.exec()
     
     def auto_increment_number(self, base_number, offset):
         """Auto-increment a number string"""
@@ -1726,6 +1811,7 @@ class BatchProcessingWindow(QMainWindow):
         receiver_layout = QVBoxLayout()
         
         details = [
+            ("Phone", customer.get('phone', '')),
             ("Address", customer.get('address', '')),
             ("SF.NO", customer.get('sf_no', '')),
             ("RC.NO", customer.get('rc_no', '')),

@@ -125,6 +125,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS customers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
+                phone TEXT,
                 address TEXT,
                 sf_no TEXT,
                 rc_no TEXT,
@@ -133,6 +134,13 @@ class Database:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # Add phone column if it doesn't exist (for existing databases)
+        try:
+            cursor.execute("ALTER TABLE customers ADD COLUMN phone TEXT")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore
+            pass
         
         # Add location_id column if it doesn't exist (for existing databases)
         try:
@@ -325,6 +333,7 @@ class Database:
                     CREATE TABLE IF NOT EXISTS customers_new (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL,
+                        phone TEXT,
                         address TEXT,
                         sf_no TEXT,
                         rc_no TEXT,
@@ -338,8 +347,8 @@ class Database:
                 
                 # Copy data from old table to new table (excluding old blaster columns)
                 cursor.execute("""
-                    INSERT INTO customers_new (id, name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at)
-                    SELECT id, name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at
+                    INSERT INTO customers_new (id, name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at)
+                    SELECT id, name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at
                     FROM customers
                 """)
                 
@@ -485,7 +494,8 @@ class Database:
     
     # Customer operations
     def add_customer(self, name: str, address: str = "", sf_no: str = "", 
-                     rc_no: str = "", state: str = "", gstin: str = "", 
+                     rc_no: str = "", state: str = "", gstin: str = "",
+                     phone: str = "",
                      blaster_id: int = None, location_id: int = None) -> int:
         """Add a new customer - convert all text fields to uppercase"""
         # Convert all text fields to uppercase
@@ -495,13 +505,14 @@ class Database:
         rc_no = rc_no.upper() if rc_no else ""
         state = state.upper() if state else ""
         gstin = gstin.upper() if gstin else ""
+        phone = phone.strip() if phone else ""
         
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO customers (name, address, sf_no, rc_no, state, gstin, blaster_id, location_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, address, sf_no, rc_no, state, gstin, blaster_id, location_id))
+            INSERT INTO customers (name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id))
         conn.commit()
         customer_id = cursor.lastrowid
         conn.close()
@@ -514,7 +525,7 @@ class Database:
         cursor = conn.cursor()
         if location_id is not None:
             cursor.execute("""
-                SELECT c.id, c.name, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
+                SELECT c.id, c.name, c.phone, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
                        c.blaster_id, c.location_id, c.created_at,
                        b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
                 FROM customers c
@@ -524,7 +535,7 @@ class Database:
             """, (location_id,))
         else:
             cursor.execute("""
-                SELECT c.id, c.name, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
+                SELECT c.id, c.name, c.phone, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
                        c.blaster_id, c.location_id, c.created_at,
                        b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
                 FROM customers c
@@ -540,7 +551,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT c.id, c.name, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
+            SELECT c.id, c.name, c.phone, c.address, c.sf_no, c.rc_no, c.state, c.gstin, 
                    c.blaster_id, c.location_id, c.created_at,
                    b.name as blaster_name, b.document_no as blaster_document_no, b.address as blaster_address
             FROM customers c
@@ -563,6 +574,7 @@ class Database:
     
     def update_customer(self, customer_id: int, name: str, address: str = "",
                        sf_no: str = "", rc_no: str = "", state: str = "", gstin: str = "",
+                       phone: str = "",
                        blaster_id: int = None, location_id: int = None):
         """Update customer details - convert all text fields to uppercase"""
         # Convert all text fields to uppercase
@@ -572,14 +584,15 @@ class Database:
         rc_no = rc_no.upper() if rc_no else ""
         state = state.upper() if state else ""
         gstin = gstin.upper() if gstin else ""
+        phone = phone.strip() if phone else ""
         
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE customers 
-            SET name = ?, address = ?, sf_no = ?, rc_no = ?, state = ?, gstin = ?, blaster_id = ?, location_id = ?
+            SET name = ?, phone = ?, address = ?, sf_no = ?, rc_no = ?, state = ?, gstin = ?, blaster_id = ?, location_id = ?
             WHERE id = ?
-        """, (name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, customer_id))
+        """, (name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id, customer_id))
         conn.commit()
         conn.close()
     
@@ -694,7 +707,7 @@ class Database:
         
         try:
             # Get all customers ordered alphabetically by name
-            cursor.execute("SELECT id, name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at FROM customers ORDER BY name ASC")
+            cursor.execute("SELECT id, name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at FROM customers ORDER BY name ASC")
             customers = cursor.fetchall()
             
             if not customers:
@@ -706,6 +719,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS customers_temp (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
+                    phone TEXT,
                     address TEXT,
                     sf_no TEXT,
                     rc_no TEXT,
@@ -719,11 +733,11 @@ class Database:
             
             # Insert customers in alphabetical order with new IDs (1, 2, 3, ...)
             cursor.execute("DELETE FROM customers_temp")
-            for new_id, (old_id, name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at) in enumerate(customers, 1):
+            for new_id, (old_id, name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at) in enumerate(customers, 1):
                 cursor.execute("""
-                    INSERT INTO customers_temp (id, name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (new_id, name, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at))
+                    INSERT INTO customers_temp (id, name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (new_id, name, phone, address, sf_no, rc_no, state, gstin, blaster_id, location_id, created_at))
             
             # Drop old table and rename new one
             cursor.execute("DROP TABLE customers")

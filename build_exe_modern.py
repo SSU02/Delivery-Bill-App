@@ -46,6 +46,15 @@ def build_exe():
         '--hidden-import=number_to_words',
         '--hidden-import=goods_manager_modern',
         '--hidden-import=modern_calendar',
+
+        # WhatsApp feature
+        '--hidden-import=whatsapp_sender',
+        '--hidden-import=whatsapp_dialog',
+        '--hidden-import=requests',
+        '--hidden-import=qrcode',
+        '--hidden-import=qrcode.image.pure',
+        '--hidden-import=PIL',
+        '--hidden-import=PIL.Image',
     ]
     
     # Include image resources
@@ -101,6 +110,12 @@ def build_exe():
         print("  5. Client enters license key and app works!")
         print("\nNote: The database (delivery_bill.db) will be created")
         print("      automatically when the app runs for the first time.")
+        print("\n*** WhatsApp Feature – copy these alongside the .exe ***")
+        print("  - whatsapp_server.js")
+        print("  - package.json")
+        print("  - .puppeteerrc.cjs")
+        print("  - node_modules/  (entire folder)")
+        print("  The end-user also needs Node.js installed from nodejs.org")
         print("="*60 + "\n")
     except Exception as e:
         print(f"\nError building executable: {e}")
